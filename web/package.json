@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "assets": "../blender-dl/blender -b -P ../blender/build_assets.py",
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "balance": "node ../tools/balance.mjs 40"
   },
   "keywords": [],
   "author": "",
