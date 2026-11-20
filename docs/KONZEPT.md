@@ -109,7 +109,7 @@ Der Aufzug ist ein Engpass, das Treppenhaus langsamer.
 | 2 | **Writers' Room & Studio** | Eigenproduktionen (Konzept + Cast + Budget) |
 | 1 | **Social-Media-Büro** | Hype aufbauen (Trailer, Influencer-Kooperation, Memes). Erhöht die Startquote einer Sendung. |
 | EG | **Lobby / Kiosk** | Geschenke, Gerüchte, Rivalen beobachten |
-| UG | **Serverraum / „Der Hacker“** | Sabotage: Rivalen-Stream lahmlegen, Leak einer Staffel, Fake-Bewertungen |
+| UG | **Hausmeister Kalle** | Harmlose Streiche gegen Rivalen (Konfetti im Büro, Antennen-Kitzler) + Flurfunk über deren Programm |
 | eigene Etage | **Senderbüro + Archiv** | Programmplaner, eigenes Archiv, Statistiken |
 
 **Ereignisse im Tower (modernisierte Zufallsereignisse):**
@@ -167,7 +167,7 @@ Alle Titel sind eigene Parodien, keine echten Werke. Beispiele für den Content-
 | Genre | Titel (Parodie) | Note |
 |---|---|---|
 | Reality-Dating | **„Love Island Exit – Gestrandet & Getrennt“** | Gen Z ↑, Jury ↓↓ |
-| True Crime | **„Mörder, die wir likten“** (Doku-Serie) | Trend-Magnet |
+| Krimi | **„Tatort Kleingarten“** | Wer hat den Gartenzwerg entführt? |
 | Prestige-Drama | **„Die Erbinnen von Hohenwalde“** | Jury ↑↑, teuer |
 | Koch-Battle | **„Das perfekte Desaster“** | Familien ↑ |
 | Sci-Fi | **„Stranger Schnitzel“** (80er-Nostalgie aus der Provinz) | Millennials, Nerds |
@@ -271,15 +271,24 @@ KI-generierte Programme und News.
 
 ---
 
-## 10. Offene Fragen an dich
+## 10. Entscheidungen (Stand Prototyp)
 
-1. **Echtzeit-Tower** (wie das Original, Hektik) oder **Zug-/Aktionspunkte** pro Tag (entspannter, besser für Mobile)? Vorschlag: Echtzeit mit Pause.
-2. **Sprache:** Deutsch zuerst, später Englisch?
-3. **Herzensziel:** Jury-Preis wie vorgeschlagen, oder doch eine (eigene) Romanze?
-4. **Humor-Härtegrad:** Familienfreundlich oder bissig/satirisch?
-5. **Multiplayer** langfristig ein Ziel? Dann bauen wir die Simulation von Anfang an serverfähig.
+| Frage | Entscheidung |
+|---|---|
+| Zeitmodell | **Echtzeit mit Pause** (und 2×-Tempo). Ein Tower-Tag dauert ca. 2:45 Min. |
+| Sprache | **Nur Deutsch** |
+| Herzensziel | Prototyp: **Jury / Goldene Fernbedienung**. Später evtl. zusätzlich eine eigene Romanze, im finalen Spiel beide Enden möglich. |
+| Humor | **Familienfreundlich**: Sabotage heißt jetzt „Streiche“ (Konfetti-Kanone, Antennen-Kitzler) und läuft über Hausmeister Kalle statt über einen Hacker. Keine Krimi-Härte. |
+| Multiplayer | **Nein** |
 
----
+## 11. Umsetzung des Prototyps
+
+- `blender/build_assets.py`: Erzeugt **alle 3D-Modelle prozedural** (Tower mit 14 Räumen und Einrichtung, Stadt, Figur mit Gelenken, Accessoires, Aufzug, Wohnzimmer, Trophäe) → `web/assets/crazytv.glb`.
+- `web/src/sim.js`: Simulation (Zuschauermodell, Wirtschaft, Werbeverträge, Image, Jury, Chefin, KI-Rivalen). Ohne Grafik testbar.
+- `web/src/world.js`: Three.js-Welt (Tower, Laufwege, Aufzug mit einer Person, Raumbelegung, Kamera, Wohnzimmer-Szene).
+- `web/src/main.js`: Spielschleife, Raum-Panels, Programmplaner, Sendeabend, Bilanz.
+- `tools/balance.mjs`: Spielt viele Saisons headless durch, um die Balance zu prüfen.
+- `web/build.mjs`: Packt alles (inkl. Three.js und Modelle) in **eine HTML-Datei** zum Spielen als Artifact.
 
 ### Quellen
 - [Wikipedia (de): Mad TV](https://de.wikipedia.org/wiki/Mad_TV)

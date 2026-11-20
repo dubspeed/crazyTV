@@ -1,0 +1,20 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "assets": "../blender-dl/blender -b -P ../blender/build_assets.py",
+    "build": "node build.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "type": "module"
+}

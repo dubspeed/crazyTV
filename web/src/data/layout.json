@@ -1,0 +1,27 @@
+{
+  "roomW": 8,
+  "shaftW": 3,
+  "floorH": 4,
+  "slab": 0.3,
+  "depth": 6,
+  "walkZ": 2.1,
+  "insideZ": 0.2,
+  "minLevel": -1,
+  "maxLevel": 5,
+  "rooms": [
+    { "id": "hausmeister", "name": "Hausmeister Kalle", "level": -1, "side": "L", "wall": "#7d8fa6" },
+    { "id": "lager", "name": "Lager", "level": -1, "side": "R", "wall": "#8e8a80", "closed": "Hier stehen nur Kisten mit alten Videokassetten." },
+    { "id": "kiosk", "name": "Kiosk", "level": 0, "side": "L", "wall": "#f2a65a" },
+    { "id": "lobby", "name": "Lobby", "level": 0, "side": "R", "wall": "#cfd8dc", "closed": "Die Lobby. Hier kommen Gäste an – für dich gibt es oben mehr zu tun." },
+    { "id": "office_k7", "name": "Kanal 7½", "level": 1, "side": "L", "wall": "#7fdcd2", "owner": "k7" },
+    { "id": "office_trash", "name": "TRASH24", "level": 1, "side": "R", "wall": "#ffb3d1", "owner": "trash" },
+    { "id": "office_prestige", "name": "Prestige One", "level": 2, "side": "L", "wall": "#f7dc94", "owner": "prestige" },
+    { "id": "newsroom", "name": "Newsroom", "level": 2, "side": "R", "wall": "#9fc2ff" },
+    { "id": "market", "name": "Content-Markt", "level": 3, "side": "L", "wall": "#c7b3ff" },
+    { "id": "ads", "name": "Werbeagentur", "level": 3, "side": "R", "wall": "#ffd27f" },
+    { "id": "boss", "name": "Chefetage", "level": 4, "side": "L", "wall": "#b8e0a6" },
+    { "id": "studio", "name": "Studio", "level": 4, "side": "R", "wall": "#d6d0c4", "closed": "Baustelle! Eigenproduktionen gibt es in einer späteren Version." },
+    { "id": "jury", "name": "Jury-Lounge", "level": 5, "side": "L", "wall": "#f5b8a8" },
+    { "id": "terrace", "name": "Dachterrasse", "level": 5, "side": "R", "wall": "#a9d8f0", "closed": "Schöne Aussicht – aber die Uhr tickt!" }
+  ]
+}
