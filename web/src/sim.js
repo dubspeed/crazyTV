@@ -551,6 +551,47 @@ export function placeProgram(state, sid, pid, hi, force = false, replaceStart = 
   return { ok: true };
 }
 
+/** Drag & Drop: Sendung ab hi ablegen. fromStart = verschobene Sendung. Überlappende (ungesperrte) Sendungen fliegen raus. */
+export function dropProgram(state, sid, pid, hi, fromStart = null) {
+  const st = state.stations[sid];
+  const len = progLen(state.programs[pid]);
+  if (hi < 0 || hi + len > HOURS.length) return { ok: false, msg: `⏱ ${len}` };
+  for (let i = hi; i < hi + len; i++) {
+    const inst = instanceAt(state, sid, i);
+    if (cellLocked(state, sid, i) && !(inst && inst.start === fromStart)) return { ok: false, msg: '🔒' };
+  }
+  if (fromStart !== null) { const old = instanceAt(state, sid, fromStart); if (old) clearInstance(st, old.start, old.len); }
+  const bumped = [];
+  for (let i = hi; i < hi + len; i++) {
+    const inst = instanceAt(state, sid, i);
+    if (inst) { bumped.push(inst.pid); clearInstance(st, inst.start, inst.len); }
+  }
+  for (let i = 0; i < len; i++) { st.schedule[hi + i].prog = pid; st.schedule[hi + i].part = i; }
+  return { ok: true, bumped };
+}
+
+/** Prüft eine Ablage ohne sie auszuführen. */
+export function dropFits(state, sid, pid, hi, fromStart = null) {
+  const len = progLen(state.programs[pid]);
+  if (hi < 0 || hi + len > HOURS.length) return false;
+  for (let i = hi; i < hi + len; i++) {
+    const inst = instanceAt(state, sid, i);
+    if (cellLocked(state, sid, i) && !(inst && inst.start === fromStart)) return false;
+  }
+  return true;
+}
+
+/** Beste freie Lücke für eine Sendung (für Antippen im Regal). */
+export function bestGap(state, sid, pid) {
+  let best = null;
+  for (let hi = 0; hi < HOURS.length; hi++) {
+    if (!canPlace(state, sid, pid, hi)) continue;
+    const e = estimateBlock(state, sid, pid, hi);
+    if (!best || e > best.e) best = { hi, e };
+  }
+  return best;
+}
+
 /** Sendung um dir (−1/+1) Stunden verschieben, falls Platz ist. */
 export function moveProgram(state, sid, hi, dir) {
   const inst = instanceAt(state, sid, hi);

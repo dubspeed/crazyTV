@@ -117,7 +117,7 @@ Steuerprüfung räumt ein Büro (wird als Studio mietbar), Klimaaktivisten klebe
 ### 4.3 Programmplanung (Blockraster wie im Original)
 Der Abend hat **7 Stundenblöcke** (18–01 Uhr). Jeder Block besteht aus **55 Min. Programm + 5 Min. Werbeblock**.
 Sendungen dauern **1–4 Blöcke** (Serien/Talk 1, Filme und große Shows 2–3, Epen 4). Lange Sendungen werden jede Stunde von Werbung unterbrochen, halten ihr Publikum aber stark über die Pause.
-Der Spieler muss Lücken passend füllen, Sendungen verschieben (▲/▼, tauscht mit dem Nachbarn) und entfernen. Eine laufende Sendung kann nicht abgebrochen werden, der Werbespot der laufenden Stunde ist bis :55 änderbar.
+Bedienung wie im Original per **Drag & Drop** (Maus und Touch): Sendungen aus dem Regal auf die Zeitleiste ziehen, Blöcke verschieben (was im Weg ist, fliegt zurück ins Regal), Blöcke ins Regal ziehen zum Entfernen. Werbeverträge auf die Werbeplätze ziehen. Antippen im Regal setzt die Sendung in die beste freie Lücke. Eine laufende Sendung kann nicht abgebrochen werden, der Werbespot der laufenden Stunde ist bis :55 änderbar.
 Jeder Werbespot wird am Ende seines Blocks ausgewertet: Quote geschafft = **Teilzahlung** (Gesamtsumme / Spots), sonst nichts. Ist die Frist nicht mehr zu schaffen, gibt es sofort eine Strafe. Feedback: Stempel im Fernseher (✓ +27k / ✗), Toast und Jubel der Figur.
 
 ### 4.4 Zuschauermodell (einfach erklärbar, tief genug)
