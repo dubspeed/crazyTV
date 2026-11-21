@@ -161,6 +161,30 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .manual p { margin: 2px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); }
 .title-screen .logo { font-size: 64px; padding: 24px 0 8px; }
 
+/* Sendungs-Infokarte */
+.pi-head { display: flex; gap: 12px; align-items: center; background: var(--gc); color: var(--ink); padding-bottom: 14px; }
+.m-head.pi-head p { color: rgba(23, 20, 46, 0.78); font-weight: 700; }
+.pi-icon { font-size: 40px; }
+.pi-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pi-stats div { background: var(--panel-2); border-radius: 10px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pi-stats small { color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pi-stats b { font-family: var(--display); font-weight: 600; font-size: 15px; }
+.pi-stats .qbar { width: 100%; }
+.pi-groups { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.pi-groups div { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 18px; }
+.pi-groups .qbar { width: 100%; }
+.pi-hours { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; align-items: end; height: 120px; }
+.pi-h { position: relative; height: 100%; border: 0; border-radius: 8px; background: var(--panel-2); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding: 3px 0; overflow: hidden; }
+.pi-h i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(25, 195, 177, 0.45); }
+.pi-h.best i { background: var(--k7); }
+.pi-h.cur { box-shadow: 0 0 0 2px var(--text); }
+.pi-h b, .pi-h span, .pi-h em { position: relative; font-size: 11px; font-weight: 800; }
+.pi-h b { font-family: var(--display); font-size: 12.5px; }
+.pi-h em { position: absolute; top: 3px; font-style: normal; color: var(--warn); }
+.pi-h.no { opacity: 0.35; }
+.pi-h.none { opacity: 0.25; justify-content: flex-end; }
+@media (max-width: 420px) { .pi-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* Programmplaner: Zeitleiste + Regal (Drag & Drop) */
 .tl { flex: 0 0 auto; position: relative; margin-right: 0; user-select: none; -webkit-user-select: none; }
 .tl-row { position: absolute; left: 0; right: 0; height: 44px; border-top: 1px dashed var(--line); z-index: 0; }

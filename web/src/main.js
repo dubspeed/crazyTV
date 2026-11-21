@@ -3,7 +3,7 @@ import * as S from './sim.js';
 import { drawScreen } from './tvscreen.js';
 import { World, ROOMS } from './world.js';
 import {
-  STATIONS, HOURS, GENRES, GROUPS, GIFTS, PRANKS, hourLabel, BOSS_NAME, JURY_NAME,
+  STATIONS, HOURS, GENRES, GROUPS, GROUP_KEYS, GIFTS, PRANKS, hourLabel, BOSS_NAME, JURY_NAME,
 } from './data/content.js';
 
 const $ = (s) => document.querySelector(s);
@@ -674,7 +674,7 @@ function initDrag() {
     d.el.classList.remove('dragging');
     if (e.type === 'pointercancel') { flushRender(); return; }
     if (!d.active) {
-      if (d.kind === 'prog') autoPlace(d.pid);
+      if (d.kind === 'prog' || d.kind === 'inst') showProgInfo(d.pid, d.start);
       flushRender();
       return;
     }
@@ -741,6 +741,48 @@ function dropAt(d) {
   else sfx.bad();
 }
 
+function showProgInfo(pid, placedStart = null) {
+  const p = state.programs[pid];
+  const len = S.progLen(p);
+  const G = GENRES[p.g];
+  const starts = HOURS.map((h, hi) => {
+    if (hi + len > HOURS.length) return null;
+    return { hi, e: S.estimateBlock(state, 'k7', pid, hi), ok: S.dropFits(state, 'k7', pid, hi, placedStart), free: S.canPlace(state, 'k7', pid, hi, placedStart) };
+  });
+  const max = Math.max(...starts.filter(Boolean).map((x) => x.e), 0.1);
+  const best = starts.filter((x) => x && x.ok).sort((a, b) => b.e - a.e)[0];
+  const aired = p.airings ? `${p.airings}×` : 'neu';
+  const trend = trendKnown() && state.trend.g === p.g;
+  openModal(`<div class="m-head pi-head g-${p.g}"><span class="pi-icon">${G.icon}</span><div style="min-width:0"><h2>${esc(p.t)}</h2><p>${esc(p.d || '')}</p></div></div>
+    <div class="m-body">
+      <div class="pi-stats">
+        <div><small>⏱</small><b>${len} Std.</b></div>
+        <div><small>${G.name}</small><b>${{ film: 'Film', serie: 'Serie', show: 'Show' }[p.k]}</b></div>
+        <div><small>Qualität</small>${qbar(p.q)}</div>
+        <div><small>Frische</small>${fbar(p.fresh)}</div>
+        <div><small>🔥 Hype</small>${qbar(p.hype / 0.6 * 100, 'var(--warn)')}</div>
+        <div><small>🏆 Jury</small>${qbar(G.jury * p.q, 'var(--prestige)')}</div>
+        <div><small>Gesendet</small><b>${aired}</b></div>
+        <div><small>Wert</small><b>${k(S.sellPrice(state, pid))}</b></div>
+      </div>
+      <div class="pi-groups">${GROUP_KEYS.map((g, i) => `<div><span>${GROUPS[g].icon}</span>${qbar(G.pref[i] * 100, 'var(--k7)')}</div>`).join('')}</div>
+      <div class="meta">${G.peak.map((h) => `<span class="pill">⏰ ${hourLabel(h).slice(0, 2)}</span>`).join('')}${trend ? '<span class="pill good">📈 Trend</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</div>
+      <div class="pi-hours">${starts.map((x, hi) => x ? `<button class="pi-h${x.ok ? '' : ' no'}${best && best.hi === hi ? ' best' : ''}${placedStart === hi ? ' cur' : ''}" data-at="${hi}" ${x.ok ? '' : 'disabled'}><i style="height:${(x.e / max) * 100}%"></i><b class="num">${m1(x.e)}</b><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span>${x.ok && !x.free ? '<em>↩</em>' : ''}</button>` : `<div class="pi-h none"><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span></div>`).join('')}</div>
+    </div>
+    <div class="m-foot">${placedStart !== null && !S.cellLocked(state, 'k7', placedStart) ? '<button class="btn pink" data-at="x">✕</button>' : ''}<button class="btn alt" data-close>OK</button></div>`);
+  $('#modal').querySelectorAll('[data-at]').forEach((b) => b.addEventListener('click', () => {
+    if (b.disabled) return;
+    if (b.dataset.at === 'x') S.removeAt(state, 'k7', placedStart);
+    else {
+      const r = S.dropProgram(state, 'k7', pid, +b.dataset.at, placedStart);
+      if (r.ok && r.bumped.length) toast(`↩ ${r.bumped.map((x) => state.programs[x].t).join(', ')}`);
+    }
+    sfx.click();
+    closeModal();
+    renderPanel();
+  }));
+}
+
 function autoPlace(pid) {
   const g = S.bestGap(state, 'k7', pid);
   if (!g) { toast(`⏱ ${S.progLen(state.programs[pid])} – keine Lücke`, 'bad'); sfx.bad(); return; }
@@ -801,7 +843,8 @@ const MANUAL = [
     <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
     <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
   ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild.
-    <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen. Regal-Sendung antippen = beste freie Lücke.
+    <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen.
+    <br><b>Antippen</b> (Regal oder Block): Infokarte mit Werten, Zielgruppen und erwarteter Quote je Startzeit. Startzeit antippen = dort einplanen (↩ = verdrängt etwas).
     <br>Werbevertrag auf einen Werbeplatz rechts ziehen, antippen = wieder frei.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
