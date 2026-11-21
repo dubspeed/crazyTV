@@ -104,7 +104,7 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .chip.target { background: var(--k7); color: var(--ink); }
 
 /* Panel */
-#panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 74%; display: flex; flex-direction: column; background: var(--panel); border-radius: 22px 22px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.4); transform: translateY(105%); transition: transform 0.28s cubic-bezier(.2,.9,.3,1.1); padding-bottom: env(safe-area-inset-bottom, 0px); }
+#panel { box-sizing: border-box; position: absolute; left: 0; right: 0; bottom: 0; max-height: 74%; display: flex; flex-direction: column; background: var(--panel); border-radius: 22px 22px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.4); transform: translateY(105%); transition: transform 0.28s cubic-bezier(.2,.9,.3,1.1); padding-bottom: env(safe-area-inset-bottom, 0px); }
 #panel.open { transform: translateY(0); }
 @media (max-width: 899px) {
   #panel { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 62px); max-height: calc(100% - env(safe-area-inset-top, 0px) - 230px); }
@@ -161,13 +161,28 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .manual p { margin: 2px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); }
 .title-screen .logo { font-size: 64px; padding: 24px 0 8px; }
 
+/* Programmplaner (Blockraster) */
+.plan { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; grid-auto-rows: minmax(52px, auto); gap: 5px 8px; align-items: stretch; }
+.plan .hr { grid-column: 1; font-family: var(--display); font-weight: 600; font-size: 14px; padding-top: 8px; color: var(--muted); }
+.plan .hr.prime { color: var(--warn); }
+.plan > .slot-prog { grid-column: 2; align-items: flex-start; }
+.plan > .slot-prog.multi { background: linear-gradient(180deg, var(--panel-2), rgba(45, 39, 88, 0.6)); border-left: 4px solid var(--k7); }
+.plan > .slot-prog.live { box-shadow: 0 0 0 2px var(--bad); }
+.plan > .slot-prog.past { opacity: 0.55; }
+.plan > .slot-prog.empty-slot { justify-content: center; align-items: center; font-size: 18px; }
+.adcell { grid-column: 3; display: flex; align-items: flex-end; padding-bottom: 6px; max-width: 96px; min-width: 0; }
+.adcell .slot-ad { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-ad.gone { border: 0; color: var(--line); }
+.slot-ad.set.live { border-color: var(--bad); color: var(--text); }
+
 /* Programmplaner */
 .slot { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: stretch; }
 .slot .hr { font-family: var(--display); font-weight: 600; font-size: 15px; padding-top: 10px; color: var(--muted); }
 .slot .hr.prime { color: var(--warn); }
 .slot-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .slot-prog { text-align: left; border: 0; background: var(--panel-2); border-radius: 12px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; min-width: 0; }
-.slot-prog .grow { flex: 1; min-width: 0; }
+.slot-prog .grow { flex: 1; min-width: 0; display: block; }
+.slot-prog .t { display: block; }
 .slot-prog .t { font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .slot-prog.empty-slot { border: 2px dashed var(--line); background: transparent; color: var(--muted); }
 .slot-ad { align-self: flex-start; border: 0; border-radius: 999px; padding: 3px 10px; background: transparent; border: 1.5px dashed var(--line); font-size: 12px; font-weight: 800; color: var(--muted); }

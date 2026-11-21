@@ -112,7 +112,7 @@ async function boot() {
 }
 
 function loadSave() {
-  try { const s = localStorage.getItem(SAVE_KEY); return s ? S.deserialize(s) : null; } catch { return null; }
+  try { const s = localStorage.getItem(SAVE_KEY); const st = s ? S.deserialize(s) : null; return st && st.version === 2 ? st : null; } catch { return null; }
 }
 function writeSave() {
   try { localStorage.setItem(SAVE_KEY, S.serialize(state)); } catch { /* Speicher nicht verfügbar */ }
@@ -175,6 +175,9 @@ function loop(now) {
     }
     if (!warned && state.minute >= S.AIR_START - 15) { warned = true; toast('📺 18:00 On Air'); sfx.ding(); }
     const hi = Math.floor((state.minute - S.AIR_START) / 60);
+    const eveNow = state.eve?.day === state.day ? state.eve : null;
+    // Werbeblock :55–:00 wird zum Stundenende ausgewertet, danach startet die nächste Stunde
+    for (let h = (eveNow?.adDone ?? -1) + 1; h < HOURS.length && S.AIR_START + (h + 1) * 60 <= state.minute; h++) airAdUI(h);
     for (let h = (state.eve?.day === state.day ? state.eve.hi : -1) + 1; h <= Math.min(hi, HOURS.length - 1); h++) airHour(h);
     if (state.minute >= S.DAY_END) endDay();
     world.setTimeOfDay(state.minute);
@@ -391,7 +394,8 @@ function tabs(room, list) {
 }
 function bestHour(pid) {
   let best = 0, bh = 0;
-  HOURS.forEach((h, hi) => { const e = S.estimate(state, 'k7', pid, hi).total; if (e > best) { best = e; bh = hi; } });
+  const len = S.progLen(state.programs[pid]);
+  HOURS.forEach((h, hi) => { if (hi + len > HOURS.length) return; const e = S.estimateBlock(state, 'k7', pid, hi); if (e > best) { best = e; bh = hi; } });
   return { hi: bh, e: best };
 }
 function progMeta(p) {
@@ -408,34 +412,41 @@ function officeBody() {
   if (tab === 'plan') {
     const n = st.newsBought.length;
     html += `<div class="meta"><span class="pill ${n ? 'good' : 'warn'}">📰 ${n}/${S.MAX_NEWS}</span>${trendKnown() ? `<span class="pill good">📈 ${GENRES[state.trend.g].icon} ${state.trend.tag}</span>` : ''}${st.debuff.confetti && state.minute < st.debuff.confetti ? '<span class="pill bad">🎉</span>' : ''}${st.debuff.antenna ? '<span class="pill bad">📡 20–22</span>' : ''}</div>`;
+    html += `<div class="plan">`;
+    const eve = state.eve && state.eve.day === state.day ? state.eve : null;
     HOURS.forEach((h, hi) => {
-      const slot = st.schedule[hi];
-      const p = slot.prog ? state.programs[slot.prog] : null;
-      const locked = S.slotLocked(state, hi);
-      if (locked) {
-        const r = state.eve.hours[hi].per.k7;
-        const live = hi === state.eve.hi;
-        const won = state.eve.hours[hi].winner === 'k7';
-        html += `<div class="slot${live ? ' live' : ' past'}"><div class="hr num">${hourLabel(h)}</div><div class="slot-body"><div class="slot-prog locked">${r.genre ? `<span style="font-size:20px">${GENRES[r.genre].icon}</span>` : ''}<span class="grow"><span class="t">${esc(r.title)}</span><span class="meta">${live ? '<span class="pill bad">● ON AIR</span>' : ''}${won ? '👑' : ''}${r.ad ? `<span class="pill ${r.ad.ok ? 'good' : 'bad'}">💼 ${r.ad.ok ? '✓' : '✗'}</span>` : ''}</span></span><span class="est num">${m1(r.viewers)}</span></div></div></div>`;
-        return;
+      const row = hi + 1;
+      html += `<div class="hr num${h >= 20 && h <= 22 ? ' prime' : ''}" style="grid-row:${row}">${hourLabel(h)}</div>`;
+      // Programm-Karte (nur in der Startstunde, über alle Blöcke gespannt)
+      const inst = S.instanceAt(state, 'k7', hi);
+      if (!inst) {
+        const locked = S.cellLocked(state, 'k7', hi);
+        html += `<button class="slot-prog empty-slot" style="grid-row:${row}" ${locked ? 'disabled' : `data-act="pickProg" data-hi="${hi}"`}>${locked ? '📺 Testbild' : '+'}</button>`;
+      } else if (inst.start === hi) {
+        const p = state.programs[inst.pid];
+        const span = `grid-row:${row} / span ${inst.len}`;
+        const liveNow = eve && eve.hi >= inst.start && eve.hi < inst.start + inst.len;
+        const past = eve && eve.hi >= inst.start + inst.len - 1 && !liveNow;
+        const locked = S.cellLocked(state, 'k7', hi);
+        let right;
+        if (eve && eve.hi >= inst.start) {
+          const vs = [];
+          for (let i = inst.start; i <= Math.min(eve.hi, inst.start + inst.len - 1); i++) vs.push(eve.hours[i].per.k7.viewers);
+          right = m1(vs.reduce((a, b) => a + b, 0) / vs.length);
+        } else right = m1(S.estimateBlock(state, 'k7', p.id, hi));
+        const won = eve && eve.hours.slice(inst.start, inst.start + inst.len).some((H) => H.winner === 'k7');
+        const dup = st.schedule.some((c, i) => c.prog === p.id && c.part === 0 && i !== hi);
+        html += `<button class="slot-prog${liveNow ? ' live' : ''}${past ? ' past' : ''}${inst.len > 1 ? ' multi' : ''}" style="${span}" ${locked ? '' : `data-act="pickProg" data-hi="${hi}"`}>
+          <span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${locked ? '' : stars(S.fitStars(state, 'k7', p.id, hi))}${inst.len > 1 ? `<span class="pill">⏱${inst.len}</span>` : ''}${liveNow ? '<span class="pill bad">● ON AIR</span>' : ''}${won ? '👑' : ''}${dup ? '<span class="pill bad">2×</span>' : ''}${!locked && p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</span></span><span class="est num">${right}</span></button>`;
       }
-      const est = p ? S.estimate(state, 'k7', p.id, hi) : null;
-      const dup = p && st.schedule.findIndex((s) => s.prog === p.id) !== hi;
-      let ad = `<button class="slot-ad" data-act="pickAd" data-hi="${hi}">+💼</button>`;
-      const c = slot.ad && st.contracts.find((x) => x.id === slot.ad);
-      if (c) {
-        const v = est ? (c.group ? est.byGroup[c.group] : est.total) : 0;
-        ad = `<button class="slot-ad set ${v >= c.minM ? 'ok' : 'risk'}" data-act="pickAd" data-hi="${hi}">💼 ${esc(c.brand)}</button>`;
-      }
-      html += `<div class="slot"><div class="hr num${h >= 20 && h <= 22 ? ' prime' : ''}">${hourLabel(h)}</div><div class="slot-body">
-        <button class="slot-prog${p ? '' : ' empty-slot'}" data-act="pickProg" data-hi="${hi}">
-          ${p ? `<span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${stars(S.fitStars(state, 'k7', p.id, hi))}${dup ? '<span class="pill bad">2×</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</span></span><span class="est num">${m1(est.total)}</span>` : '<span class="grow">—</span>'}
-        </button>${ad}</div></div>`;
+      // Werbeplatz dieser Stunde
+      html += `<div class="adcell" style="grid-row:${row}">${adChip(hi)}</div>`;
     });
+    html += `</div>`;
   } else if (tab === 'archive') {
     html += S.archive(state, 'k7').sort((a, b) => b.q - a.q).map((p) => {
       const bh = bestHour(p.id);
-      return `<div class="card"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}<span class="num">⏰ ${hourLabel(HOURS[bh.hi])}</span></div></div></div>`;
+      return `<div class="card"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}<span class="pill">⏱${S.progLen(p)}</span><span class="num">⏰ ${hourLabel(HOURS[bh.hi])}</span></div></div></div>`;
     }).join('');
   } else if (tab === 'contracts') {
     html += contractList(st.contracts, false);
@@ -450,7 +461,7 @@ function contractList(list, offer) {
     const left = offer ? c.days : c.deadlineDay - state.day + 1;
     const need = c.group ? `${GROUPS[c.group].icon} ≥${m1(c.minM)}` : `≥${m1(c.minM)}`;
     return `<div class="card"><div class="grow"><h3>${esc(c.brand)}</h3>
-      <div class="meta num"><span class="pill">${offer ? c.spots : `${c.done}/${c.spots}`}×</span><span class="pill">${need}</span><span class="pill ${left <= 1 ? 'bad' : ''}">⏳${left}</span><span style="color:var(--good)">+${k(c.reward)}</span><span style="color:var(--bad)">−${k(c.penalty)}</span></div></div>
+      <div class="meta num"><span class="pill">${offer ? c.spots : `${c.done}/${c.spots}`}×</span><span class="pill">${need}</span><span class="pill ${left <= 1 ? 'bad' : ''}">⏳${left}</span><span style="color:var(--good)">${c.spots}×${k(c.reward / c.spots)}</span><span style="color:var(--bad)">−${k(c.penalty)}</span></div></div>
       ${offer ? `<button class="btn" data-act="acceptAd" data-id="${c.id}" ${full ? 'disabled' : ''}>✓</button>` : ''}</div>`;
   }).join('');
 }
@@ -477,7 +488,7 @@ function marketBody() {
       const price = S.programPrice(p);
       const bh = bestHour(id);
       return `<div class="card" title="${esc(p.d)}"><span style="font-size:22px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3>
-        <div class="meta num">${qbar(p.q)}<span>⏰ ${hourLabel(HOURS[bh.hi])} · ${m1(bh.e)}</span><span>${progMeta(p)}</span></div></div>
+        <div class="meta num">${qbar(p.q)}<span class="pill">⏱${S.progLen(p)}</span><span>⏰ ${hourLabel(HOURS[bh.hi])} · ${m1(bh.e)}</span><span>${progMeta(p)}</span></div></div>
         <button class="btn" data-act="buy" data-id="${id}" ${st.money < price ? 'disabled' : ''}>${k(price)}</button></div>`;
     }).join('') : '<p class="empty">—</p>';
   } else {
@@ -556,8 +567,8 @@ function act(a, d) {
   switch (a) {
     case 'tab': tabState[d.room] = d.tab; renderPanel(); break;
     case 'help': showHelp(openRoom); break;
-    case 'pickProg': if (!S.slotLocked(state, +d.hi)) pickProgram(+d.hi); break;
-    case 'pickAd': if (!S.slotLocked(state, +d.hi)) pickAd(+d.hi); break;
+    case 'pickProg': if (!S.cellLocked(state, 'k7', +d.hi)) pickProgram(+d.hi); break;
+    case 'pickAd': if (!S.adLocked(state, +d.hi)) pickAd(+d.hi); break;
     case 'buy': result(S.buyProgram(state, me, d.id)); break;
     case 'sell': result(S.sellProgram(state, me, d.id)); break;
     case 'acceptAd': result(S.acceptContract(state, me, d.id)); break;
@@ -576,18 +587,55 @@ function act(a, d) {
   }
 }
 
+function adChip(hi) {
+  const st = state.stations.k7;
+  const eve = state.eve && state.eve.day === state.day ? state.eve : null;
+  const slot = st.schedule[hi];
+  if (eve && (eve.adDone ?? -1) >= hi) {
+    const r = eve.hours[hi].per.k7.ad;
+    if (!r) return '<span class="slot-ad gone">·</span>';
+    return `<span class="slot-ad set ${r.ok ? 'ok' : 'risk'}">${r.ok ? `✓ ${k(r.paid)}` : '✗'}</span>`;
+  }
+  const c = slot.ad && st.contracts.find((x) => x.id === slot.ad);
+  if (S.adLocked(state, hi)) return c ? `<span class="slot-ad set live">● ${esc(c.brand)}</span>` : '<span class="slot-ad gone">·</span>';
+  if (!c) return `<button class="slot-ad" data-act="pickAd" data-hi="${hi}">+💼</button>`;
+  const inst = S.instanceAt(state, 'k7', hi);
+  const v = inst ? (eve && eve.hi >= hi ? eve.hours[hi].per.k7 : S.estimate(state, 'k7', inst.pid, hi, hi > inst.start)) : null;
+  const val = v ? (c.group ? v.byGroup[c.group] : (v.total ?? v.viewers)) : 0;
+  return `<button class="slot-ad set ${val >= c.minM ? 'ok' : 'risk'}" data-act="pickAd" data-hi="${hi}">💼 ${esc(c.brand)}</button>`;
+}
+
 function pickProgram(hi) {
   const st = state.stations.k7;
-  const arc = S.archive(state, 'k7').map((p) => ({ p, e: S.estimate(state, 'k7', p.id, hi).total })).sort((a, b) => b.e - a.e);
-  const planned = (pid) => st.schedule.map((s, i) => (s.prog === pid && i !== hi ? String(HOURS[i] % 24).padStart(2, '0') : null)).filter(Boolean);
-  openModal(`<div class="m-head"><h2 class="num">${hourLabel(HOURS[hi])}</h2></div>
-    <div class="m-body">${arc.map(({ p, e }) => {
+  const inst = S.instanceAt(state, 'k7', hi);
+  const start = inst ? inst.start : hi;
+  const gap = S.gapAt(state, 'k7', start, inst ? inst.start : null);
+  const arc = S.archive(state, 'k7').map((p) => ({ p, e: S.estimateBlock(state, 'k7', p.id, start), fits: S.canPlace(state, 'k7', p.id, start, inst ? inst.start : null) }))
+    .sort((a, b) => (b.fits - a.fits) || (b.e - a.e));
+  const planned = (pid) => st.schedule.map((c, i) => (c.prog === pid && c.part === 0 && i !== start ? String(HOURS[i] % 24).padStart(2, '0') : null)).filter(Boolean);
+  const cur = inst ? state.programs[inst.pid] : null;
+  openModal(`<div class="m-head"><h2 class="num">${hourLabel(HOURS[start])} · ⏱ ${gap}</h2>
+    ${cur ? `<div class="meta" style="margin-top:6px"><span class="pill">${GENRES[cur.g].icon} ${esc(cur.t)}</span><button class="btn alt" data-mv="-1">▲</button><button class="btn alt" data-mv="1">▼</button><button class="btn pink" data-pick="">✕</button></div>` : ''}</div>
+    <div class="m-body">${arc.map(({ p, e, fits }) => {
       const pl = planned(p.id);
-      return `<button class="slot-prog" data-pick="${p.id}"><span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${stars(S.fitStars(state, 'k7', p.id, hi))}${fbar(p.fresh)}${pl.length ? `<span class="pill warn">${pl.join(' ')}</span>` : ''}${progMeta(p)}</span></span><span class="est num">${m1(e)}</span></button>`;
+      const len = S.progLen(p);
+      return `<button class="slot-prog" data-pick="${p.id}" ${fits ? '' : 'disabled style="opacity:.4"'}><span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${stars(S.fitStars(state, 'k7', p.id, start))}<span class="pill ${fits ? '' : 'bad'}">⏱${len}</span>${fbar(p.fresh)}${pl.length ? `<span class="pill warn">${pl.join(' ')}</span>` : ''}${progMeta(p)}</span></span><span class="est num">${m1(e)}</span></button>`;
     }).join('')}</div>
-    <div class="m-foot"><button class="btn alt" data-pick="">Leeren</button><button class="btn alt" data-close>✕</button></div>`);
+    <div class="m-foot"><button class="btn alt" data-close>✕</button></div>`);
   $('#modal').querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
-    st.schedule[hi].prog = b.dataset.pick || null;
+    if (b.disabled) return;
+    if (!b.dataset.pick) S.removeAt(state, 'k7', start);
+    else {
+      const r = S.placeProgram(state, 'k7', b.dataset.pick, start, false, inst ? inst.start : null);
+      if (!r.ok) { toast(r.msg, 'bad'); return; }
+    }
+    sfx.click();
+    closeModal();
+    renderPanel();
+  }));
+  $('#modal').querySelectorAll('[data-mv]').forEach((b) => b.addEventListener('click', () => {
+    const r = S.moveProgram(state, 'k7', start, +b.dataset.mv);
+    if (!r.ok) { sfx.bad(); return; }
     sfx.click();
     closeModal();
     renderPanel();
@@ -597,7 +645,8 @@ function pickProgram(hi) {
 function pickAd(hi) {
   const st = state.stations.k7;
   const slot = st.schedule[hi];
-  const est = slot.prog ? S.estimate(state, 'k7', slot.prog, hi) : { total: 0, byGroup: {} };
+  const aired = state.eve && state.eve.day === state.day && state.eve.hi >= hi ? state.eve.hours[hi].per.k7 : null;
+  const est = aired ? { total: aired.viewers, byGroup: aired.byGroup } : slot.prog ? S.estimate(state, 'k7', slot.prog, hi, slot.part > 0) : { total: 0, byGroup: {} };
   const used = (cid) => st.schedule.filter((s, i) => s.ad === cid && i !== hi).length;
   const list = st.contracts.map((c) => {
     const v = c.group ? est.byGroup[c.group] : est.total;
@@ -667,7 +716,8 @@ const MANUAL = [
     <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Der Fernseher unten links zeigt das laufende Programm. Mit den Farbknöpfen schaltest du um, 🛋️ zeigt Familie Mittelmaß, ein Tipp aufs Bild verkleinert ihn. Nachts verraten die Fenster der Stadt, wer gerade was schaut (rot = Streaming).
     <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
     <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
-  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stunden, 18–01 Uhr. Pro Stunde eine Sendung und danach ein Werbespot (💼). Leere Stunde = Testbild.
+  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild.
+    <br>Antippen: ▲/▼ verschieben (tauscht mit dem Nachbarn), ✕ entfernen, andere Sendung wählen.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
     <br>Der Plan bleibt von Tag zu Tag stehen. Planen kannst du nur hier im Büro.`],
@@ -675,7 +725,7 @@ const MANUAL = [
     <br>Balken = Qualität · ⏰ beste Uhrzeit mit geschätzten Zuschauern · 🔥 Hype · 🏆 mag die Jury · 📈 Trend des Tages.
     <br>Verkaufen bringt weniger, je abgenutzter die Sendung ist.`],
   ['ads', '💼 Werbeagentur', `Vertrag = Spots × Mindestquote (≥ Mio., evtl. nur eine Zielgruppe) innerhalb der Frist ⏳ in Tagen.
-    <br>Ausgezahlt wird erst, wenn <b>alle</b> Spots die Quote geschafft haben. Verpasste Frist = Strafe. Max. ${S.MAX_CONTRACTS} Verträge.
+    <br>Jeder Spot läuft im Werbeblock um :55. Schafft er die Quote, wird sein Anteil sofort ausgezahlt (z. B. 3×13k). Zu wenig Zuschauer = kein Geld, der Spot muss wiederholt werden. Ist die Frist nicht mehr zu schaffen, kommt die Strafe. Max. ${S.MAX_CONTRACTS} Verträge. Den Spot der laufenden Stunde kannst du bis :55 ändern.
     <br>Im Planer: grüner Rand = Quote reicht voraussichtlich, gelber Rand = knapp.`],
   ['newsroom', '📰 Newsroom', `📈 Hier erfährst du den <b>Trend des Tages</b>: Das Genre bringt +25 %.
     <br>Bis zu ${S.MAX_NEWS} Meldungen stärken die 20-Uhr-Sendung. Ohne Nachrichten gibt es dort einen Malus. 🏛️ Politik und 🎨 Kultur bringen extra 🏆.`],
@@ -714,16 +764,30 @@ function airHour(hi) {
   if (H.winner === 'k7') sfx.cash();
   const wa = H.winner === 'k7' ? player : ai[H.winner]?.actor;
   if (wa) world.cheer(wa);
-  const me = H.per.k7;
-  if (me.ad?.paid) toast(`💼 ${me.ad.brand} +${k(me.ad.paid)}`, 'good');
-  else if (me.ad) toast(`💼 ${me.ad.brand} ${me.ad.ok ? '✓' : '✗'}`, me.ad.ok ? '' : 'bad');
-  for (const p of me.penalties || []) { toast(`💸 ${p.brand} −${k(p.amount)}`, 'bad'); sfx.bad(); }
   for (const s of [SIDS[hi % 3], 'k7']) feedItems.unshift(S.comment(state, H, s));
   feedItems = feedItems.slice(0, 2);
   renderOnAir();
   renderHud();
   if (openRoom === 'office_k7') renderPanel();
   if (watching) renderWatch();
+}
+
+const stamps = {}; // sid -> { ok, text, until }
+function airAdUI(hi) {
+  const H = S.airAd(state, hi);
+  const now = performance.now() / 1000;
+  for (const s of SIDS) {
+    const r = H.per[s].ad;
+    if (r) stamps[s] = { ok: r.ok, text: r.ok ? `+${k(r.paid)}` : `${m1(r.got)}/${m1(r.need)}`, until: now + 3 };
+  }
+  const me = H.per.k7;
+  if (me.ad) {
+    if (me.ad.ok) { toast(`💼 ${me.ad.brand} ${me.ad.spot}/${me.ad.spots} +${k(me.ad.paid)}`, 'good'); sfx.cash(); world.cheer(player); }
+    else { toast(`💼 ${me.ad.brand} ✗ ${m1(me.ad.got)}/${m1(me.ad.need)}`, 'bad'); sfx.bad(); }
+  }
+  for (const p of me.penalties || []) { toast(`💸 ${p.brand} ${p.done}/${p.spots} −${k(p.amount)}`, 'bad'); sfx.bad(); }
+  renderHud();
+  if (openRoom === 'office_k7' || openRoom === 'ads') renderPanel();
 }
 
 function currentHour() {
@@ -747,9 +811,19 @@ function tvInfo(sid, roomId) {
   }
   if (!onAir) return { mode: 'test', sid };
   const p = H.per[sid];
-  if (!p.prog) return { mode: 'test', sid };
-  if (Math.floor(state.minute) % 60 >= 52 && p.ad) return { mode: 'ad', sid, brand: p.ad.brand };
-  return { mode: 'show', sid, genre: p.genre, title: p.title, crown: H.winner === sid };
+  const stp = stamps[sid] && stamps[sid].until > performance.now() / 1000 ? stamps[sid] : null;
+  const hi = state.eve.hi;
+  if (Math.floor(state.minute) % 60 >= 55) {
+    // Werbeblock
+    const st = state.stations[sid];
+    const c = st.schedule[hi].ad && st.contracts.find((x) => x.id === st.schedule[hi].ad);
+    if (c && p.prog) return { mode: 'ad', sid, brand: c.brand, spot: `${c.done + 1}/${c.spots}` };
+    const next = st.schedule[hi + 1]?.prog ? state.programs[st.schedule[hi + 1].prog] : null;
+    return { mode: 'break', sid, next: next ? (st.schedule[hi + 1].part > 0 ? `${next.t} ▶` : next.t) : '' };
+  }
+  if (!p.prog) return { mode: 'test', sid, stamp: stp };
+  const part = p.len > 1 ? ` (${p.part + 1}/${p.len})` : '';
+  return { mode: 'show', sid, genre: p.genre, title: p.title + part, crown: H.winner === sid, stamp: stp };
 }
 
 function renderOnAir() {

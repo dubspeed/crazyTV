@@ -213,6 +213,23 @@ function testbild(g, w, h, sid, t) {
   g.fillText(Math.floor(t) % 2 ? 'SENDESCHLUSS' : '18:00 ON AIR', w / 2, h * 0.9);
 }
 
+function brk(g, w, h, info, t) {
+  const c = STATION_COLOR[info.sid];
+  bg(g, w, h, c, '#20233a');
+  const s = 1 + Math.sin(t * 2) * 0.04;
+  g.save(); g.translate(w / 2, h * 0.42); g.scale(s, s);
+  circle(g, 0, 0, h * 0.24, 'rgba(255,255,255,0.18)', 14);
+  g.fillStyle = '#ffffff';
+  g.font = `700 ${Math.round(h * 0.2)}px Fredoka, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(STATION_SHORT[info.sid], 0, 0);
+  g.restore();
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  g.font = `800 ${Math.round(h * 0.075)}px Nunito, sans-serif`;
+  g.textAlign = 'center';
+  g.fillText(info.next ? `Gleich: ${info.next}` : 'Pause', w / 2, h * 0.82, w * 0.9);
+}
+
 function ad(g, w, h, info, t) {
   const hue = (info.brand || 'x').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   bg(g, w, h, `hsl(${hue},80%,62%)`, `hsl(${(hue + 40) % 360},80%,45%)`);
@@ -229,6 +246,28 @@ function ad(g, w, h, info, t) {
   g.font = `800 ${Math.round(h * 0.07)}px Nunito, sans-serif`;
   g.textAlign = 'left';
   g.fillText('WERBUNG', w * 0.08, h * 0.12);
+  if (info.spot) {
+    g.textAlign = 'center';
+    g.font = `800 ${Math.round(h * 0.09)}px Nunito, sans-serif`;
+    g.fillText(`Spot ${info.spot}`, w / 2, h * 0.75);
+  }
+}
+
+function stamp(g, w, h, st, t) {
+  g.save();
+  g.translate(w * 0.5, h * 0.48);
+  g.rotate(-0.12);
+  g.globalAlpha = Math.max(0, Math.min(1, (st.until - t) * 2));
+  g.fillStyle = st.ok ? 'rgba(46,170,96,0.92)' : 'rgba(214,52,52,0.92)';
+  const bw = w * 0.62, bh = h * 0.34;
+  g.fillRect(-bw / 2, -bh / 2, bw, bh);
+  g.strokeStyle = '#ffffff'; g.lineWidth = Math.max(2, h * 0.02);
+  g.strokeRect(-bw / 2 + 4, -bh / 2 + 4, bw - 8, bh - 8);
+  g.fillStyle = '#ffffff';
+  g.font = `700 ${Math.round(h * 0.15)}px Fredoka, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(`${st.ok ? '✓' : '✗'} ${st.text}`, 0, 2);
+  g.restore();
 }
 
 /**
@@ -240,8 +279,9 @@ export function drawScreen(g, w, h, info, t) {
   if (info.mode === 'off') { rect(g, 0, 0, w, h, '#0d0f18'); g.restore(); return; }
   if (info.mode === 'test') testbild(g, w, h, info.sid, t);
   else if (info.mode === 'ad') ad(g, w, h, info, t);
+  else if (info.mode === 'break') brk(g, w, h, info, t);
   else (ART[info.genre] || ART.comedy)(g, w, h, t);
-  if (info.osd !== false && info.mode !== 'test') {
+  if (info.osd !== false && info.mode !== 'test' && info.mode !== 'break') {
     // Senderlogo
     const c = STATION_COLOR[info.sid];
     g.fillStyle = 'rgba(0,0,0,0.35)';
@@ -266,6 +306,7 @@ export function drawScreen(g, w, h, info, t) {
     }
     if (info.crown) { g.font = `${Math.round(h * 0.13)}px sans-serif`; g.textAlign = 'left'; g.fillText('👑', h * 0.05, h * 0.13); }
   }
+  if (info.stamp) stamp(g, w, h, info.stamp, performance.now() / 1000);
   // Scanlines für Röhren-Flair
   g.fillStyle = 'rgba(0,0,0,0.07)';
   for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);
