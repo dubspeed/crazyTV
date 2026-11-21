@@ -118,6 +118,7 @@ function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ega
 
 function startGame(s) {
   state = s;
+  lastMoney = null;
   closeModal();
   beginMorning();
 }
@@ -280,6 +281,8 @@ function renderHud() {
   const k = state.stations.k7;
   $('#dayLbl').textContent = `Tag ${state.day} / ${S.SEASON_DAYS}`;
   $('#money').textContent = S.fmtMoney(k.money);
+  if (lastMoney !== null && Math.round(k.money) !== lastMoney) moneyFloat(Math.round(k.money) - lastMoney);
+  lastMoney = Math.round(k.money);
   $('#money').style.color = k.money < 0 ? 'var(--bad)' : '';
   const order = ['k7', 'trash', 'prestige'];
   $('#imageBar').innerHTML = order.map((s) => `<i style="flex-grow:${Math.max(0.5, state.stations[s].image)};background:${STATIONS[s].color}"></i>`).join('');
@@ -288,6 +291,15 @@ function renderHud() {
   const ev = state.event;
   $('#ticker').textContent = ev ? `📰 ${ev.t}` : '';
   renderClock();
+}
+
+let lastMoney = null;
+function moneyFloat(d) {
+  const el = document.createElement('span');
+  el.className = 'mfloat num ' + (d >= 0 ? 'up' : 'down');
+  el.textContent = (d >= 0 ? '+' : '−') + k(Math.abs(d));
+  $('#moneyCard').appendChild(el);
+  setTimeout(() => el.remove(), 1600);
 }
 
 function toggleSpeed() {
@@ -648,7 +660,8 @@ const MANUAL = [
   ['day', '⏱️ Der Tag', `Ein Tag geht von 08 bis 01 Uhr, die Uhr läuft immer weiter, auch in Räumen. ▶ / ⏩ / ⏸ oben rechts, Leertaste = Tempo.
     <br>Ziel antippen → deine Figur läuft hin. Der <b>Aufzug</b> nimmt nur eine Person mit. In einem <b>besetzten Raum</b> wartest du vor der Tür. Wer in einem Raum steht, blockiert ihn für die anderen.
     <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Oben siehst du die Live-Quoten, 📺 schaltet ins Wohnzimmer.
-    <br>Um 01 Uhr kommt die Bilanz.`],
+    <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
+    <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
   ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stunden, 18–01 Uhr. Pro Stunde eine Sendung und danach ein Werbespot (💼). Leere Stunde = Testbild.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
@@ -694,8 +707,10 @@ function airHour(hi) {
   const H = S.simulateHour(state, hi);
   sfx.ding();
   if (H.winner === 'k7') sfx.cash();
-  const ad = H.per.k7.ad;
-  if (ad) toast(`💼 ${ad.brand} ${ad.ok ? '✓' : '✗'}`, ad.ok ? 'good' : 'bad');
+  const me = H.per.k7;
+  if (me.ad?.paid) toast(`💼 ${me.ad.brand} +${k(me.ad.paid)}`, 'good');
+  else if (me.ad) toast(`💼 ${me.ad.brand} ${me.ad.ok ? '✓' : '✗'}`, me.ad.ok ? '' : 'bad');
+  for (const p of me.penalties || []) { toast(`💸 ${p.brand} −${k(p.amount)}`, 'bad'); sfx.bad(); }
   for (const s of [SIDS[hi % 3], 'k7']) feedItems.unshift(S.comment(state, H, s));
   feedItems = feedItems.slice(0, 2);
   renderOnAir();
@@ -771,12 +786,11 @@ function endDay() {
 }
 
 function showSummary(res) {
-  const k = res.summary.k7;
+  const ks = res.summary.k7;
   const sids = ['k7', 'trash', 'prestige'];
   const maxV = Math.max(...res.hours.flatMap((h) => sids.map((s) => h.per[s].viewers)), 1);
-  const imgDelta = k.imageAfter - k.imageBefore;
-  const juryD = Math.round(k.juryGain * 10) / 10;
-  const other = k.moneyAfter - k.moneyBefore - (k.adIncome + k.baseIncome - k.penalties - k.costs) + (res.bossResult?.ok ? res.bossResult.goal.reward : 0);
+  const imgDelta = ks.imageAfter - ks.imageBefore;
+  const juryD = Math.round(ks.juryGain * 10) / 10;
   let boss = '';
   if (res.bossResult) boss = `<div class="card"><span style="font-size:24px">👩‍💼</span><div class="grow"><h3>${res.bossResult.ok ? 'Ziel erreicht!' : 'Ziel verpasst.'}</h3><p>${esc(res.bossResult.goal.text)}${res.bossResult.ok ? ` +${S.fmtMoney(res.bossResult.goal.reward)}` : ' Die Chefin ist enttäuscht.'}</p></div></div>`;
   openModal(`<div class="m-head"><h2>Bilanz – Tag ${res.day}</h2></div>
@@ -787,19 +801,15 @@ function showSummary(res) {
       <div class="tbl-wrap"><table class="res-table num"><tr><th>Sender</th><th>Zuschauer</th><th>Stunden 👑</th><th>Image</th></tr>
       ${sids.map((s) => { const x = res.summary[s]; const d = x.imageAfter - x.imageBefore; return `<tr><td style="color:${STATIONS[s].color};font-weight:800">${STATIONS[s].name}</td><td>${S.fmtM(x.viewers)}</td><td>${x.hoursWon}</td><td>${x.imageAfter} <span style="color:${d >= 0 ? 'var(--good)' : 'var(--bad)'}">(${d >= 0 ? '+' : ''}${d})</span></td></tr>`; }).join('')}</table></div>
       <div class="money-lines num">
-        <span>Werbeerlöse</span><span style="color:var(--good)">+${S.fmtMoney(k.baseIncome)}</span>
-        <span>Verträge (${k.adOk}✓${k.adFail ? ` ${k.adFail}✗` : ''})</span><span style="color:var(--good)">+${S.fmtMoney(k.adIncome)}</span>
-        ${k.penalties ? `<span>Strafen</span><span style="color:var(--bad)">−${S.fmtMoney(k.penalties)}</span>` : ''}
-        <span>Kosten${k.interest ? ' + Zinsen' : ''}</span><span style="color:var(--bad)">−${S.fmtMoney(k.costs)}</span>
-        ${res.bossResult?.ok ? `<span>Bonus 🎯</span><span style="color:var(--good)">+${S.fmtMoney(res.bossResult.goal.reward)}</span>` : ''}
-        <span class="sum">Kontostand</span><span class="sum">${S.fmtMoney(k.moneyAfter)}</span>
+        <span>Tagesbeginn</span><span>${S.fmtMoney(ks.moneyBefore)}</span>
+        ${Object.keys(S.JOURNAL_KINDS).filter((kd) => res.journal[kd]).map((kd) => `<span>${S.JOURNAL_KINDS[kd]}${kd === 'ad' ? ` (${ks.adOk}✓${ks.adFail ? ` ${ks.adFail}✗` : ''})` : ''}</span><span style="color:${res.journal[kd] >= 0 ? 'var(--good)' : 'var(--bad)'}">${res.journal[kd] >= 0 ? '+' : ''}${S.fmtMoney(res.journal[kd])}</span>`).join('')}
+        <span class="sum">Kontostand</span><span class="sum">${S.fmtMoney(ks.moneyAfter)}</span>
       </div>
-      <div class="meta"><span class="pill ${imgDelta >= 0 ? 'good' : 'bad'}">Image ${imgDelta >= 0 ? '+' : ''}${imgDelta}</span><span class="pill good">Jury +${juryD}</span>${k.repeats ? `<span class="pill warn">${k.repeats}× doppelt gesendet</span>` : ''}</div>
+      <div class="meta"><span class="pill ${imgDelta >= 0 ? 'good' : 'bad'}">Image ${imgDelta >= 0 ? '+' : ''}${imgDelta}</span><span class="pill good">Jury +${juryD}</span>${ks.repeats ? `<span class="pill warn">${ks.repeats}× doppelt gesendet</span>` : ''}</div>
       ${boss}
-      ${k.moneyAfter < 0 ? `<div class="meta"><span class="pill bad">⚠️ Minus ${state.stations.k7.negDays}/3</span></div>` : ''}
+      ${ks.moneyAfter < 0 ? `<div class="meta"><span class="pill bad">⚠️ Minus ${state.stations.k7.negDays}/3</span></div>` : ''}
     </div>
     <div class="m-foot"><button class="btn" id="nextBtn">${state.over ? 'Weiter' : `▶ Tag ${res.day + 1}`}</button></div>`, { dismiss: false });
-  void other;
   $('#nextBtn').addEventListener('click', () => {
     sfx.click();
     if (state.over) { showEnd(); return; }

@@ -41,6 +41,25 @@ const round = (v, step = 1000) => Math.round(v / step) * step;
 export const fmtMoney = (v) => (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('de-DE') + ' €';
 export const fmtM = (v) => v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' Mio.';
 
+// ------------------------------------------------------------------ Buchungen
+/** Jede Geldbewegung wird sofort gebucht und (für den Spieler) im Tagesjournal festgehalten. */
+export function book(state, sid, amount, kind, label = '') {
+  amount = Math.round(amount);
+  if (!amount) return;
+  state.stations[sid].money += amount;
+  (state.journal ||= []).push({ sid, m: Math.floor(state.minute), amount, kind, label });
+}
+export const JOURNAL_KINDS = {
+  base: 'Werbeerlöse', ad: 'Werbeverträge', bonus: 'Bonus 🎯', sell: 'Verkäufe', loan: 'Kredit',
+  buy: 'Einkäufe', news: 'Nachrichten', gift: 'Geschenke', prank: 'Streiche', penalty: 'Strafen',
+  cost: 'Betriebskosten', interest: 'Zinsen', repay: 'Tilgung',
+};
+export function journalSum(state, sid = 'k7') {
+  const out = {};
+  for (const e of state.journal || []) if (e.sid === sid) out[e.kind] = (out[e.kind] || 0) + e.amount;
+  return out;
+}
+
 // ------------------------------------------------------------------ Programme
 export function programPrice(p) {
   return round(p.q * p.q * 9 + p.h * 70000 + (p.k === 'film' ? 12000 : 0) + 6000);
@@ -109,9 +128,13 @@ export function startDay(state) {
   state.minute = DAY_START;
   state.roomLocks = {};
   state.jury.giftsToday = {};
+  state.journal = [];
   for (const st of Object.values(state.stations)) {
     st.newsBought = [];
     st.debuff = {};
+    st.dayStartMoney = st.money;
+    book(state, st.id, -DAILY_COST, 'cost', 'Miete & Gehälter');
+    if (st.loan) book(state, st.id, -st.loan * LOAN_RATE, 'interest', 'Kreditzinsen');
   }
   // Ereignis (60 %)
   state.event = rngNext(state) < 0.6 ? pick(state, EVENTS) : null;
@@ -298,13 +321,40 @@ export function simulateHour(state, hi) {
           c.done++;
           summary[s].adOk++;
           if (c.done >= c.spots) {
-            st.money += c.reward;
+            book(state, s, c.reward, 'ad', c.brand);
             summary[s].adIncome += c.reward;
             c.completed = true;
+            per[s].ad.paid = c.reward;
           }
         } else summary[s].adFail++;
       }
     }
+  }
+  // Sofort buchen: allgemeine Werbeerlöse, News-Jury um 20 Uhr, Verträge aufräumen, Strafen
+  for (const s of sids) {
+    const st = state.stations[s];
+    const base = per[s].viewers * VIEWER_REVENUE;
+    book(state, s, base, 'base', hourLabel(h));
+    per[s].base = Math.round(base);
+    summary[s].baseIncome = (summary[s].baseIncome || 0) + Math.round(base);
+    if (h === 20) {
+      const nj = st.newsBought.reduce((a, n) => a + n.q * (n.topic === 'kultur' || n.topic === 'politik' ? 1.5 : 1), 0) / 45;
+      st.jury += nj;
+      summary[s].juryGain += nj;
+    }
+    const hoursLeft = HOURS.length - 1 - hi;
+    for (const c of st.contracts) {
+      if (c.completed) continue;
+      // Frist nicht mehr zu schaffen -> Strafe sofort
+      if (c.deadlineDay <= state.day && c.spots - c.done > hoursLeft) {
+        book(state, s, -c.penalty, 'penalty', c.brand);
+        summary[s].penalties += c.penalty;
+        c.expired = true;
+        (per[s].penalties ||= []).push({ brand: c.brand, amount: c.penalty });
+      }
+    }
+    st.contracts = st.contracts.filter((c) => !c.completed && !c.expired);
+    for (const slot of st.schedule) if (slot.ad && !st.contracts.some((c) => c.id === slot.ad)) slot.ad = null;
   }
   // Image: Stundensieger nimmt dem Letzten einen Punkt ab
   const ranked = sids.slice().sort((a, b) => per[b].viewers - per[a].viewers);
@@ -327,41 +377,6 @@ export function finishDay(state) {
   for (let hi = eve.hi + 1; hi < HOURS.length; hi++) simulateHour(state, hi);
   const sids = Object.keys(state.stations);
   const { hours, summary } = eve;
-  // News -> Jury
-  for (const s of sids) {
-    const st = state.stations[s];
-    const nj = st.newsBought.reduce((a, n) => a + n.q * (n.topic === 'kultur' || n.topic === 'politik' ? 1.5 : 1), 0) / 45;
-    st.jury += nj;
-    summary[s].juryGain += nj;
-  }
-
-  // Verträge: erledigte entfernen, Deadlines prüfen
-  for (const s of sids) {
-    const st = state.stations[s];
-    for (const c of st.contracts) {
-      if (!c.completed && state.day >= c.deadlineDay) {
-        st.money -= c.penalty;
-        summary[s].penalties += c.penalty;
-        c.expired = true;
-      }
-    }
-    st.contracts = st.contracts.filter((c) => !c.completed && !c.expired);
-    // Ads in Slots, deren Vertrag weg ist, löschen
-    for (const slot of st.schedule) if (slot.ad && !st.contracts.some((c) => c.id === slot.ad)) slot.ad = null;
-  }
-
-  // Kosten
-  for (const s of sids) {
-    const st = state.stations[s];
-    const interest = Math.round(st.loan * LOAN_RATE);
-    const cost = DAILY_COST + interest;
-    const base = Math.round(summary[s].viewers * VIEWER_REVENUE);
-    st.money += base - cost;
-    summary[s].baseIncome = base;
-    summary[s].costs = cost;
-    summary[s].interest = interest;
-  }
-
   // Chefin-Ziel
   let bossResult = null;
   const goal = state.boss.goal;
@@ -370,7 +385,7 @@ export function finishDay(state) {
     const val = goal.id === 'prime' ? k.prime : goal.id === 'wins' ? k.hoursWon : goal.id === 'ads' ? k.adOk : k.viewers;
     const ok = val >= goal.n;
     if (ok) {
-      state.stations.k7.money += goal.reward;
+      book(state, 'k7', goal.reward, 'bonus', 'Tagesziel');
       state.boss.mood = Math.min(3, state.boss.mood + 1);
     } else state.boss.mood -= 1;
     bossResult = { ok, goal, val };
@@ -380,13 +395,14 @@ export function finishDay(state) {
     const st = state.stations[s];
     summary[s].imageAfter = st.image;
     summary[s].moneyAfter = st.money;
+    summary[s].moneyBefore = st.dayStartMoney ?? summary[s].moneyBefore;
     summary[s].jury = st.jury;
   }
 
   // Frische erholt sich über Nacht
   for (const p of Object.values(state.programs)) p.fresh = Math.min(1, p.fresh + 0.08);
 
-  const result = { day: state.day, hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
+  const result = { day: state.day, journal: journalSum(state, 'k7'), hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
   state.lastResults = result;
   state.eve = null;
   state.history.push({ day: state.day, viewers: Object.fromEntries(sids.map((s) => [s, summary[s].viewers])), image: Object.fromEntries(sids.map((s) => [s, state.stations[s].image])) });
@@ -457,7 +473,7 @@ export function buyProgram(state, sid, pid) {
   const price = programPrice(p);
   if (p.owner) return { ok: false, msg: 'Schon verkauft.' };
   if (st.money < price) return { ok: false, msg: 'Nicht genug Geld.' };
-  st.money -= price;
+  book(state, sid, -price, 'buy', p.t);
   p.owner = sid;
   state.market = state.market.filter((x) => x !== pid);
   return { ok: true, msg: `„${p.t}“ gekauft.` };
@@ -468,7 +484,7 @@ export function sellProgram(state, sid, pid) {
   const st = state.stations[sid];
   if (p.owner !== sid) return { ok: false };
   const v = sellPrice(state, pid);
-  st.money += v;
+  book(state, sid, v, 'sell', p.t);
   p.owner = PROGRAMS.some((x) => x.id === pid) ? null : 'gone';
   for (const slot of st.schedule) if (slot.prog === pid) slot.prog = null;
   return { ok: true, msg: `„${p.t}“ für ${fmtMoney(v)} verkauft.` };
@@ -493,7 +509,7 @@ export function buyNews(state, sid, nid) {
   if (st.newsBought.length >= MAX_NEWS) return { ok: false, msg: `Maximal ${MAX_NEWS} Meldungen pro Abend.` };
   if (state.minute >= 20 * 60) return { ok: false, msg: '📰 ⏰ 20:00 vorbei' };
   if (st.money < n.price) return { ok: false, msg: 'Nicht genug Geld.' };
-  st.money -= n.price;
+  book(state, sid, -n.price, 'news', n.t);
   st.newsBought.push(n);
   state.news = state.news.filter((x) => x.id !== nid);
   return { ok: true, msg: 'Meldung gekauft.' };
@@ -503,7 +519,7 @@ export function buyGift(state, sid, gid) {
   const g = GIFTS.find((x) => x.id === gid);
   const st = state.stations[sid];
   if (st.money < g.price) return { ok: false, msg: 'Nicht genug Geld.' };
-  st.money -= g.price;
+  book(state, sid, -g.price, 'gift', g.name);
   st.gifts.push(gid);
   return { ok: true, msg: `${g.name} gekauft.` };
 }
@@ -525,7 +541,7 @@ export function prank(state, sid, prankId, target) {
   const pr = PRANKS.find((x) => x.id === prankId);
   const st = state.stations[sid];
   if (st.money < pr.price) return { ok: false, msg: 'Nicht genug Geld.' };
-  st.money -= pr.price;
+  book(state, sid, -pr.price, 'prank', pr.name);
   const caught = rngNext(state) < 0.25;
   let msg = '';
   if (prankId === 'confetti') {
@@ -549,7 +565,7 @@ export function takeLoan(state, sid) {
   const st = state.stations[sid];
   if (st.loan + LOAN_STEP > LOAN_MAX) return { ok: false, msg: 'Kreditrahmen ausgeschöpft.' };
   st.loan += LOAN_STEP;
-  st.money += LOAN_STEP;
+  book(state, sid, LOAN_STEP, 'loan', 'Kredit');
   return { ok: true, msg: `${fmtMoney(LOAN_STEP)} Kredit erhalten.` };
 }
 export function repayLoan(state, sid) {
@@ -558,7 +574,7 @@ export function repayLoan(state, sid) {
   if (!v) return { ok: false, msg: 'Kein Kredit offen.' };
   if (st.money < v) return { ok: false, msg: 'Nicht genug Geld.' };
   st.loan -= v;
-  st.money -= v;
+  book(state, sid, -v, 'repay', 'Tilgung');
   return { ok: true, msg: `${fmtMoney(v)} zurückgezahlt.` };
 }
 
