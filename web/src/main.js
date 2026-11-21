@@ -16,7 +16,6 @@ let speed = 1; // 0 = Pause
 let player = null;
 const ai = {}; // sid -> { actor, plan, stayUntil }
 let openRoom = null;
-let officeTab = 'plan';
 let warned = false;
 let lastFrame = performance.now();
 let evening = null;
@@ -145,8 +144,7 @@ function beginMorning() {
   renderHud();
   renderChips();
   const ev = state.event;
-  if (state.day === 1) toast('Du sitzt in deinem Büro. Plane den Abend – oder geh erst einkaufen!');
-  else if (ev) toast(`📰 ${ev.t}`);
+  if (ev) toast(`📰 ${ev.t}`);
 }
 
 // ------------------------------------------------------------------ Hauptschleife
@@ -161,13 +159,13 @@ function loop(now) {
     if (state.pendingNotices?.length) {
       for (const n of state.pendingNotices) {
         const who = STATIONS[n.sid].name;
-        toast(n.prank === 'confetti' ? `🎉 ${who} hat dein Büro mit Konfetti geflutet! (1 Std. gesperrt)` : `📡 ${who} hat an deiner Antenne gekitzelt – Bildstörung zur Primetime!`, 'bad');
+        toast(n.prank === 'confetti' ? `🎉 ${who}: Konfetti im Büro!` : `📡 ${who}: Bildstörung 20–22 Uhr!`, 'bad');
         sfx.bad();
       }
       state.pendingNotices = [];
       renderPanel();
     }
-    if (!warned && state.minute >= S.DAY_END - 45) { warned = true; toast('⏰ In 45 Minuten beginnt der Sendeabend!'); }
+    if (!warned && state.minute >= S.DAY_END - 45) { warned = true; toast('⏰ 17:15'); sfx.ding(); }
     if (state.minute >= S.DAY_END) startEvening();
     world.setTimeOfDay(state.minute);
     renderClock();
@@ -220,12 +218,12 @@ function onRoomTap(roomId) {
   const r = ROOMS[roomId];
   sfx.click();
   if (r.closed) { toast(r.closed); return; }
-  if (r.owner && r.owner !== 'k7') { toast(`Das Büro von ${STATIONS[r.owner].name}. Hier hast du nichts verloren!`); return; }
+  if (r.owner && r.owner !== 'k7') { toast(`🚫 ${STATIONS[r.owner].name}`); return; }
   if (player.room === roomId && player.state === 'inRoom') { openRoomPanel(roomId); return; }
   closePanel();
   world.goTo(player, roomId);
   world.highlight(roomId);
-  setStatus(`Unterwegs: ${r.name} …`);
+  setStatus(`→ ${r.name}`);
   renderChips();
 }
 
@@ -251,9 +249,7 @@ function onLeave(actor, roomId) {
 
 function onRoomBusy(actor, roomId, occ, locked) {
   if (!actor.isPlayer) return;
-  if (locked) toast(`🎉 ${ROOMS[roomId].name}: alles voller Konfetti! Du wartest, bis aufgeräumt ist.`, 'bad');
-  else toast(`${ROOMS[roomId].name} ist besetzt von ${STATIONS[occ.sid].name}. Du wartest vor der Tür …`);
-  setStatus(`Wartet vor: ${ROOMS[roomId].name}`);
+  setStatus(locked ? `🎉 ${ROOMS[roomId].name}` : `🚪 ${ROOMS[roomId].name} · ${STATIONS[occ.sid].short}`);
 }
 
 function leaveRoom() {
@@ -280,7 +276,7 @@ function renderHud() {
   $('#imageNums').innerHTML = order.map((s) => `<span style="color:${STATIONS[s].color}"><span class="sn">${STATIONS[s].short} </span>${state.stations[s].image}</span>`).join('');
   $('#juryLbl').textContent = `· Jury ${Math.round(k.jury)}`;
   const ev = state.event;
-  $('#ticker').textContent = ev ? `📰 ${ev.t} – ${ev.d}` : '';
+  $('#ticker').textContent = ev ? `📰 ${ev.t}` : '';
   renderClock();
 }
 
@@ -308,10 +304,10 @@ function renderChips() {
 
 // ------------------------------------------------------------------ Panels
 const ROOM_META = {
-  office_k7: { icon: '📺', bg: 'var(--k7)', who: 'Dein Senderbüro' },
-  market: { icon: '🎞️', bg: '#c7b3ff', who: 'Händlerin Mira Lizenzia' },
-  ads: { icon: '💼', bg: '#ffd27f', who: 'Agenturchefin Tina Tausendkontakt' },
-  newsroom: { icon: '📰', bg: '#9fc2ff', who: 'Redakteur Bernd Breaking' },
+  office_k7: { icon: '📺', bg: 'var(--k7)', who: 'Senderbüro' },
+  market: { icon: '🎞️', bg: '#c7b3ff', who: 'Mira Lizenzia' },
+  ads: { icon: '💼', bg: '#ffd27f', who: 'Tina Tausendkontakt' },
+  newsroom: { icon: '📰', bg: '#9fc2ff', who: 'Bernd Breaking' },
   boss: { icon: '👩‍💼', bg: '#b8e0a6', who: BOSS_NAME },
   jury: { icon: '🏆', bg: '#f5b8a8', who: JURY_NAME },
   kiosk: { icon: '🍬', bg: '#f2a65a', who: 'Kiosk-Kemal' },
@@ -320,7 +316,7 @@ const ROOM_META = {
 
 function openRoomPanel(roomId) {
   openRoom = roomId;
-  if (roomId === 'office_k7') officeTab = officeTab || 'plan';
+  if (roomId === 'newsroom') state.trendSeen = state.day;
   $('#panel').classList.add('open');
   document.body.classList.add('panel-open');
   world.setPanelOffset(innerWidth >= 900 ? 440 : 0);
@@ -333,6 +329,8 @@ function closePanel() {
   world.setPanelOffset(0);
 }
 
+const tabState = { office_k7: 'plan', market: 'buy', ads: 'offers' };
+
 function renderPanel() {
   if (!openRoom || !state) return;
   const meta = ROOM_META[openRoom] || { icon: '🚪', bg: 'var(--line)', who: '' };
@@ -340,13 +338,14 @@ function renderPanel() {
   const body = ({
     office_k7: officeBody, market: marketBody, ads: adsBody, newsroom: newsBody, boss: bossBody,
     jury: juryBody, kiosk: kioskBody, hausmeister: kalleBody,
-  }[openRoom] || (() => '<p class="empty">Hier gibt es nichts zu tun.</p>'))();
+  }[openRoom] || (() => ''))();
   const scroll = $('#panel .p-body')?.scrollTop || 0;
   $('#panel').innerHTML = `
     <div class="p-head">
       <div class="p-avatar" style="background:${meta.bg}">${meta.icon}</div>
       <div class="p-title"><h2>${esc(r.name)}</h2><p>${esc(meta.who)}</p></div>
-      <button class="p-close" id="pClose">Schließen ✕</button>
+      <button class="p-close" data-act="help" aria-label="Hilfe">?</button>
+      <button class="p-close" id="pClose" aria-label="Schließen">✕</button>
     </div>
     <div class="p-body">${body}</div>`;
   $('#panel .p-body').scrollTop = scroll;
@@ -354,128 +353,120 @@ function renderPanel() {
   $('#panel').querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => act(b.dataset.act, b.dataset)));
 }
 
-function stars(n) { return '★'.repeat(n) + `<span style="opacity:.3">${'★'.repeat(5 - n)}</span>`; }
+const k = (v) => (Math.abs(v) >= 1e6 ? (v / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Mio' : Math.round(v / 1000) + 'k');
+const m1 = (v) => v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+function stars(n) { return `<span class="stars">${'★'.repeat(n)}<span style="opacity:.3">${'★'.repeat(5 - n)}</span></span>`; }
 function qbar(q, color = 'var(--k7)') { return `<span class="qbar"><i style="width:${q}%;background:${color}"></i></span>`; }
-function genreTag(g) { return `<span class="pill">${GENRES[g].icon} ${GENRES[g].name}</span>`; }
-function kindLabel(k) { return { film: 'Film', serie: 'Serie', show: 'Show' }[k]; }
+function fbar(f) { return qbar(f * 100, f < 0.5 ? 'var(--warn)' : 'var(--good)'); }
+function gi(g) { return `<span title="${GENRES[g].name}">${GENRES[g].icon}</span>`; }
+function tabs(room, list) {
+  return `<div class="tabs">${list.map(([id, n]) => `<button class="tab${tabState[room] === id ? ' on' : ''}" data-act="tab" data-room="${room}" data-tab="${id}">${n}</button>`).join('')}</div>`;
+}
 function bestHour(pid) {
   let best = 0, bh = 0;
   HOURS.forEach((h, hi) => { const e = S.estimate(state, 'k7', pid, hi).total; if (e > best) { best = e; bh = hi; } });
   return { hi: bh, e: best };
 }
+function progMeta(p) {
+  return `${p.hype > 0.3 ? '🔥' : ''}${GENRES[p.g].jury >= 0.7 && p.q >= 70 ? '🏆' : ''}${trendKnown() && state.trend.g === p.g ? '📈' : ''}`;
+}
+const trendKnown = () => state.trendSeen === state.day;
 
 // --- Büro
 function officeBody() {
-  const tabs = [['plan', 'Programmplan'], ['archive', 'Archiv'], ['contracts', 'Verträge'], ['stats', 'Statistik']];
-  let html = `<div class="tabs">${tabs.map(([id, n]) => `<button class="tab${officeTab === id ? ' on' : ''}" data-act="tab" data-tab="${id}">${n}</button>`).join('')}</div>`;
   const st = state.stations.k7;
-  const confetti = st.debuff.confetti && state.minute < st.debuff.confetti;
-  if (confetti) html += `<div class="bubble">🎉 Überall Konfetti! Du kannst trotzdem planen, aber niemand kommt hier rein, bis aufgeräumt ist.</div>`;
-  if (officeTab === 'plan') {
+  const nc = st.contracts.length;
+  let html = tabs('office_k7', [['plan', '📅 Plan'], ['archive', '🎞️ Archiv'], ['contracts', `💼 ${nc}`], ['stats', '📊']]);
+  const tab = tabState.office_k7;
+  if (tab === 'plan') {
     const n = st.newsBought.length;
-    html += `<div class="bubble">Plane die Sendungen für heute Abend (18–01 Uhr). Die ★ zeigen, wie gut ein Programm auf die Uhrzeit passt. Nach jeder Sendung läuft ein Werbeblock.${state.trend ? '' : ''}</div>`;
-    html += `<div class="card"><div class="grow"><h3>📰 20-Uhr-Nachrichten</h3><p>${n ? `${n} Meldung${n > 1 ? 'en' : ''} gekauft – stärken die Primetime.` : 'Noch keine Meldungen gekauft. Ohne Nachrichten verliert die 20-Uhr-Sendung etwas.'}</p></div><span class="pill ${n ? 'good' : 'warn'}">${n}/${S.MAX_NEWS}</span></div>`;
+    html += `<div class="meta"><span class="pill ${n ? 'good' : 'warn'}">📰 ${n}/${S.MAX_NEWS}</span>${trendKnown() ? `<span class="pill good">📈 ${GENRES[state.trend.g].icon} ${state.trend.tag}</span>` : ''}${st.debuff.confetti && state.minute < st.debuff.confetti ? '<span class="pill bad">🎉</span>' : ''}${st.debuff.antenna ? '<span class="pill bad">📡 20–22</span>' : ''}</div>`;
     HOURS.forEach((h, hi) => {
       const slot = st.schedule[hi];
       const p = slot.prog ? state.programs[slot.prog] : null;
-      const prime = h >= 20 && h <= 22;
       const est = p ? S.estimate(state, 'k7', p.id, hi) : null;
       const dup = p && st.schedule.findIndex((s) => s.prog === p.id) !== hi;
-      let ad = '<button class="slot-ad" data-act="pickAd" data-hi="' + hi + '">+ Werbung</button>';
-      if (slot.ad) {
-        const c = st.contracts.find((x) => x.id === slot.ad);
-        if (c) {
-          const v = est ? (c.group ? est.byGroup[c.group] : est.total) : 0;
-          const ok = v >= c.minM;
-          ad = `<button class="slot-ad set ${ok ? 'ok' : 'risk'}" data-act="pickAd" data-hi="${hi}">💼 ${esc(c.brand)} · ${ok ? '✓' : '⚠ zu wenig?'}</button>`;
-        }
+      let ad = `<button class="slot-ad" data-act="pickAd" data-hi="${hi}">+💼</button>`;
+      const c = slot.ad && st.contracts.find((x) => x.id === slot.ad);
+      if (c) {
+        const v = est ? (c.group ? est.byGroup[c.group] : est.total) : 0;
+        ad = `<button class="slot-ad set ${v >= c.minM ? 'ok' : 'risk'}" data-act="pickAd" data-hi="${hi}">💼 ${esc(c.brand)}</button>`;
       }
-      html += `<div class="slot"><div class="hr num${prime ? ' prime' : ''}">${hourLabel(h)}</div><div class="slot-body">
+      html += `<div class="slot"><div class="hr num${h >= 20 && h <= 22 ? ' prime' : ''}">${hourLabel(h)}</div><div class="slot-body">
         <button class="slot-prog${p ? '' : ' empty-slot'}" data-act="pickProg" data-hi="${hi}">
-          ${p ? `<span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta"><span class="stars">${stars(S.fitStars(state, 'k7', p.id, hi))}</span>${dup ? '<span class="pill bad">doppelt</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">ausgelutscht</span>' : ''}</span></span><span class="est num">≈ ${S.fmtM(est.total)}</span>` : '<span class="grow">+ Sendung wählen (sonst Testbild)</span>'}
+          ${p ? `<span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${stars(S.fitStars(state, 'k7', p.id, hi))}${dup ? '<span class="pill bad">2×</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</span></span><span class="est num">${m1(est.total)}</span>` : '<span class="grow">—</span>'}
         </button>${ad}</div></div>`;
     });
-  } else if (officeTab === 'archive') {
-    const arc = S.archive(state, 'k7').sort((a, b) => b.q - a.q);
-    html += `<p class="sec-title">${arc.length} Programme im Archiv</p>`;
-    html += arc.map((p) => {
+  } else if (tab === 'archive') {
+    html += S.archive(state, 'k7').sort((a, b) => b.q - a.q).map((p) => {
       const bh = bestHour(p.id);
-      return `<div class="card"><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${genreTag(p.g)}<span>${kindLabel(p.k)}</span><span>Qualität ${qbar(p.q)}</span><span>Frische ${qbar(p.fresh * 100, p.fresh < 0.5 ? 'var(--warn)' : 'var(--good)')}</span><span>Am besten: ${hourLabel(HOURS[bh.hi])}</span></div></div></div>`;
+      return `<div class="card"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}<span class="num">⏰ ${hourLabel(HOURS[bh.hi])}</span></div></div></div>`;
     }).join('');
-  } else if (officeTab === 'contracts') {
+  } else if (tab === 'contracts') {
     html += contractList(st.contracts, false);
-  } else if (officeTab === 'stats') {
-    html += statsBody();
-  }
+  } else html += statsBody();
   return html;
 }
 
 function contractList(list, offer) {
-  if (!list.length) return `<p class="empty">${offer ? 'Keine Angebote mehr heute.' : 'Keine laufenden Werbeverträge. Die Werbeagentur ist im 3. Stock.'}</p>`;
+  if (!list.length) return '<p class="empty">—</p>';
+  const full = state.stations.k7.contracts.length >= S.MAX_CONTRACTS;
   return list.map((c) => {
-    const dl = offer ? `${c.days} Tag${c.days > 1 ? 'e' : ''} Zeit` : (c.deadlineDay === state.day ? 'Frist: heute!' : `Frist: Tag ${c.deadlineDay}`);
-    const grp = c.group ? `${GROUPS[c.group].icon} ${S.fmtM(c.minM)} ${GROUPS[c.group].name}` : `${S.fmtM(c.minM)} Zuschauer`;
-    return `<div class="card"><div class="grow"><h3>${esc(c.brand)}</h3><p>${esc(c.product)}</p>
-      <div class="meta"><span class="pill">${offer ? c.spots : `${c.done}/${c.spots}`} Spots</span><span class="pill">min. ${grp}</span><span class="pill ${!offer && c.deadlineDay === state.day ? 'bad' : ''}">${dl}</span></div>
-      <div class="meta"><span style="color:var(--good)">+${S.fmtMoney(c.reward)}</span><span style="color:var(--bad)">Strafe −${S.fmtMoney(c.penalty)}</span></div></div>
-      ${offer ? `<button class="btn" data-act="acceptAd" data-id="${c.id}" ${state.stations.k7.contracts.length >= S.MAX_CONTRACTS ? 'disabled' : ''}>Annehmen</button>` : ''}</div>`;
+    const left = offer ? c.days : c.deadlineDay - state.day + 1;
+    const need = c.group ? `${GROUPS[c.group].icon} ≥${m1(c.minM)}` : `≥${m1(c.minM)}`;
+    return `<div class="card"><div class="grow"><h3>${esc(c.brand)}</h3>
+      <div class="meta num"><span class="pill">${offer ? c.spots : `${c.done}/${c.spots}`}×</span><span class="pill">${need}</span><span class="pill ${left <= 1 ? 'bad' : ''}">⏳${left}</span><span style="color:var(--good)">+${k(c.reward)}</span><span style="color:var(--bad)">−${k(c.penalty)}</span></div></div>
+      ${offer ? `<button class="btn" data-act="acceptAd" data-id="${c.id}" ${full ? 'disabled' : ''}>✓</button>` : ''}</div>`;
   }).join('');
 }
 
 function statsBody() {
   const hist = state.history;
-  if (!hist.length) return '<p class="empty">Nach dem ersten Sendeabend gibt es hier Statistiken.</p>';
+  if (!hist.length) return '<p class="empty">—</p>';
   const max = Math.max(...hist.flatMap((h) => Object.values(h.viewers)), 1);
   const rows = hist.slice(-7);
-  return `<p class="sec-title">Zuschauer pro Abend (Mio.)</p>
-    <div class="hourchart" style="grid-template-columns:repeat(${rows.length},1fr)">${rows.map((h) => `<div class="col">${['k7', 'trash', 'prestige'].map((s) => `<i style="height:${(h.viewers[s] / max) * 100}%;background:${STATIONS[s].color}" title="${STATIONS[s].name}: ${S.fmtM(h.viewers[s])}"></i>`).join('')}</div>`).join('')}</div>
-    <div class="hourlabels" style="grid-template-columns:repeat(${rows.length},1fr)">${rows.map((h) => `<span>Tag ${h.day}</span>`).join('')}</div>
-    <div class="tbl-wrap"><table class="res-table num"><tr><th>Sender</th><th>Image</th><th>Jury</th><th>Ø Zuschauer</th></tr>
-    ${['k7', 'trash', 'prestige'].map((s) => `<tr><td style="color:${STATIONS[s].color};font-weight:800">${STATIONS[s].name}</td><td>${state.stations[s].image}</td><td>${s === 'k7' ? Math.round(state.stations[s].jury) : '?'}</td><td>${S.fmtM(hist.reduce((a, h) => a + h.viewers[s], 0) / hist.length)}</td></tr>`).join('')}</table></div>`;
+  const cols = `grid-template-columns:repeat(${rows.length},1fr)`;
+  return `<div class="hourchart" style="${cols}">${rows.map((h) => `<div class="col">${['k7', 'trash', 'prestige'].map((s) => `<i style="height:${(h.viewers[s] / max) * 100}%;background:${STATIONS[s].color}"></i>`).join('')}</div>`).join('')}</div>
+    <div class="hourlabels" style="${cols}">${rows.map((h) => `<span>${h.day}</span>`).join('')}</div>
+    <div class="tbl-wrap"><table class="res-table num"><tr><th></th><th>⭐</th><th>🏆</th><th>Ø Mio</th></tr>
+    ${['k7', 'trash', 'prestige'].map((s) => `<tr><td style="color:${STATIONS[s].color};font-weight:800">${STATIONS[s].short}</td><td>${state.stations[s].image}</td><td>${s === 'k7' ? Math.round(state.stations[s].jury) : '?'}</td><td>${m1(hist.reduce((a, h) => a + h.viewers[s], 0) / hist.length)}</td></tr>`).join('')}</table></div>`;
 }
 
 // --- Markt
 function marketBody() {
   const st = state.stations.k7;
-  let html = `<div class="bubble">„Frische Ware! Wer zuerst kommt, sendet zuerst. Die Konkurrenz war ${state.market.length < 8 ? '<b>schon hier</b>' : 'heute noch nicht da'}.“</div>`;
-  html += `<p class="sec-title">Angebote heute</p>`;
-  html += state.market.length ? state.market.map((id) => {
-    const p = state.programs[id];
-    const price = S.programPrice(p);
-    const bh = bestHour(id);
-    const trend = state.trend?.g === p.g;
-    return `<div class="card"><div class="grow"><h3>${esc(p.t)}</h3><p>${esc(p.d)}</p>
-      <div class="meta">${genreTag(p.g)}<span>${kindLabel(p.k)}</span><span>Qualität ${qbar(p.q)}</span>${p.hype > 0.3 ? '<span class="pill warn">🔥 Hype</span>' : ''}${GENRES[p.g].jury >= 0.7 && p.q >= 70 ? '<span class="pill good">🏆 Jury mag das</span>' : ''}${trend ? '<span class="pill good">📈 Trend</span>' : ''}</div>
-      <div class="meta"><span>Ideal um ${hourLabel(HOURS[bh.hi])}: ≈ ${S.fmtM(bh.e)}</span></div></div>
-      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="price num">${S.fmtMoney(price)}</span><button class="btn" data-act="buy" data-id="${id}" ${st.money < price ? 'disabled' : ''}>Kaufen</button></div></div>`;
-  }).join('') : '<p class="empty">Ausverkauft! Morgen gibt es neue Ware.</p>';
-  const arc = S.archive(state, 'k7').sort((a, b) => a.q * a.fresh - b.q * b.fresh);
-  html += `<p class="sec-title">Aus deinem Archiv verkaufen</p>`;
-  html += arc.map((p) => `<div class="card"><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${genreTag(p.g)}<span>Frische ${qbar(p.fresh * 100, p.fresh < 0.5 ? 'var(--warn)' : 'var(--good)')}</span></div></div><button class="btn alt" data-act="sell" data-id="${p.id}">+${S.fmtMoney(S.sellPrice(state, p.id))}</button></div>`).join('');
+  let html = tabs('market', [['buy', `Kaufen ${state.market.length}`], ['sell', 'Verkaufen']]);
+  if (tabState.market === 'buy') {
+    html += state.market.length ? state.market.map((id) => {
+      const p = state.programs[id];
+      const price = S.programPrice(p);
+      const bh = bestHour(id);
+      return `<div class="card" title="${esc(p.d)}"><span style="font-size:22px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3>
+        <div class="meta num">${qbar(p.q)}<span>⏰ ${hourLabel(HOURS[bh.hi])} · ${m1(bh.e)}</span><span>${progMeta(p)}</span></div></div>
+        <button class="btn" data-act="buy" data-id="${id}" ${st.money < price ? 'disabled' : ''}>${k(price)}</button></div>`;
+    }).join('') : '<p class="empty">—</p>';
+  } else {
+    html += S.archive(state, 'k7').sort((a, b) => a.q * a.fresh - b.q * b.fresh).map((p) => `<div class="card"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}</div></div><button class="btn alt" data-act="sell" data-id="${p.id}">+${k(S.sellPrice(state, p.id))}</button></div>`).join('');
+  }
   return html;
 }
 
 // --- Werbung
 function adsBody() {
   const st = state.stations.k7;
-  let html = `<div class="bubble">„Unsere Kunden zahlen nur, wenn <b>alle Spots</b> laufen und jeweils die Mindestquote erreichen. Klappt das nicht bis zur Frist, wird’s teuer!“</div>`;
-  html += `<p class="sec-title">Angebote (${st.contracts.length}/${S.MAX_CONTRACTS} Verträge belegt)</p>`;
-  html += contractList(state.adOffers, true);
-  html += `<p class="sec-title">Deine laufenden Verträge</p>`;
-  html += contractList(st.contracts, false);
-  return html;
+  return tabs('ads', [['offers', `Angebote ${state.adOffers.length}`], ['mine', `Laufend ${st.contracts.length}/${S.MAX_CONTRACTS}`]])
+    + contractList(tabState.ads === 'offers' ? state.adOffers : st.contracts, tabState.ads === 'offers');
 }
 
 // --- Newsroom
+const TOPIC = { politik: '🏛️', wetter: '🌦️', promi: '⭐', sport: '⚽', tech: '💻', tiere: '🐾', kultur: '🎨' };
 function newsBody() {
   const st = state.stations.k7;
   const t = state.trend;
-  let html = `<div class="card" style="background:linear-gradient(135deg,#ff4f9a33,#19c3b133)"><div class="grow"><p>Heute im Trend</p><h3 style="font-size:20px">${t.tag}</h3><p>${t.text} <b>${GENRES[t.g].icon} ${GENRES[t.g].name}</b> bringt heute +25 % Zuschauer.</p></div></div>`;
-  html += `<div class="bubble">„Gute Meldungen machen die 20-Uhr-Sendung stärker – und Kultur- und Politiknachrichten freuen die Jury.${state.event?.mod?.news ? ' <b>Heute ist Wahlabend: Nachrichten zählen doppelt!</b>' : ''}“</div>`;
-  html += `<p class="sec-title">Meldungen (${st.newsBought.length}/${S.MAX_NEWS} gekauft)</p>`;
-  html += state.news.length ? state.news.map((n) => `<div class="card"><div class="grow"><h3>${esc(n.t)}</h3><div class="meta"><span class="pill">${n.topic}</span><span>Relevanz ${qbar(n.q, 'var(--warn)')}</span></div></div>
-    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="price num">${S.fmtMoney(n.price)}</span><button class="btn" data-act="news" data-id="${n.id}" ${st.newsBought.length >= S.MAX_NEWS || st.money < n.price ? 'disabled' : ''}>Kaufen</button></div></div>`).join('') : '<p class="empty">Keine Meldungen mehr übrig.</p>';
-  if (st.newsBought.length) html += `<p class="sec-title">Gekauft für heute Abend</p>` + st.newsBought.map((n) => `<div class="card"><div class="grow"><h3>✅ ${esc(n.t)}</h3></div></div>`).join('');
+  const full = st.newsBought.length >= S.MAX_NEWS;
+  let html = `<div class="card trend"><span style="font-size:28px">${GENRES[t.g].icon}</span><div class="grow"><h3>📈 ${t.tag}</h3><p>${GENRES[t.g].name} +25 %</p></div><span class="pill ${full ? 'good' : ''}">📰 ${st.newsBought.length}/${S.MAX_NEWS}</span></div>`;
+  html += state.news.map((n) => `<div class="card"><span style="font-size:20px">${TOPIC[n.topic]}</span><div class="grow"><h3>${esc(n.t)}</h3><div class="meta">${qbar(n.q, 'var(--warn)')}</div></div><button class="btn" data-act="news" data-id="${n.id}" ${full || st.money < n.price ? 'disabled' : ''}>${k(n.price)}</button></div>`).join('');
+  html += st.newsBought.map((n) => `<div class="card done"><span style="font-size:20px">✅</span><div class="grow"><h3>${esc(n.t)}</h3></div></div>`).join('');
   return html;
 }
 
@@ -483,15 +474,11 @@ function newsBody() {
 function bossBody() {
   const st = state.stations.k7;
   const b = state.boss;
-  const moodTxt = b.mood >= 2 ? 'bestens gelaunt 😄' : b.mood >= 0 ? 'neutral 🙂' : b.mood === -1 ? 'angespannt 😐' : 'kurz vorm Explodieren 😠';
+  const mood = b.mood >= 2 ? '😄' : b.mood >= 0 ? '🙂' : b.mood === -1 ? '😐' : '😠';
   const goal = b.goal && b.goal.day === state.day ? b.goal : null;
-  let html = `<div class="bubble">${goal ? `„Ihr Ziel für heute: <b>${esc(goal.text)}</b> Schaffen Sie das, gibt es <b>${S.fmtMoney(goal.reward)}</b> Bonus.“` : '„Ah, Sie! Wollen Sie ein Tagesziel? Wer liefert, wird belohnt. Wer nicht liefert … nun ja.“'}</div>`;
-  if (!goal) html += `<button class="btn" data-act="goal">Tagesziel annehmen</button>`;
-  html += `<div class="card"><div class="grow"><h3>Laune der Chefin</h3><p>${moodTxt}. Drei verpasste Ziele mehr als erreichte – und du fliegst.</p></div><span class="pill ${b.mood < 0 ? 'bad' : 'good'}">${b.mood > 0 ? '+' : ''}${b.mood}</span></div>`;
-  html += `<p class="sec-title">Kredit</p><div class="card"><div class="grow"><h3>Offen: ${S.fmtMoney(st.loan)}</h3><p>${Math.round(S.LOAN_RATE * 100)} % Zinsen pro Tag. Rahmen: ${S.fmtMoney(S.LOAN_MAX)}.</p></div>
-    <div style="display:flex;flex-direction:column;gap:6px"><button class="btn" data-act="loan" ${st.loan >= S.LOAN_MAX ? 'disabled' : ''}>+${S.fmtMoney(S.LOAN_STEP)}</button><button class="btn alt" data-act="repay" ${!st.loan ? 'disabled' : ''}>Tilgen</button></div></div>`;
-  html += `<div class="bubble" style="font-size:13px">Warnung: Wer drei Tage am Stück im Minus ist oder unter 5 Image-Punkte fällt, wird gefeuert.</div>`;
-  return html;
+  return `<div class="card"><span style="font-size:28px">${mood}</span><div class="grow">${goal ? `<h3>🎯 ${esc(goal.text)}</h3><div class="meta"><span style="color:var(--good)">+${k(goal.reward)}</span></div>` : '<h3>🎯 —</h3>'}</div>${goal ? '' : '<button class="btn" data-act="goal">Ziel</button>'}</div>
+    <div class="card"><span style="font-size:24px">🏦</span><div class="grow"><h3 class="num">${k(st.loan)} / ${k(S.LOAN_MAX)}</h3><div class="meta">${Math.round(S.LOAN_RATE * 100)} %/Tag</div></div>
+    <button class="btn" data-act="loan" ${st.loan >= S.LOAN_MAX ? 'disabled' : ''}>+${k(S.LOAN_STEP)}</button><button class="btn alt" data-act="repay" ${!st.loan ? 'disabled' : ''}>−${k(S.LOAN_STEP)}</button></div>`;
 }
 
 // --- Jury
@@ -499,69 +486,57 @@ function juryBody() {
   const st = state.stations.k7;
   const rank = ['k7', 'trash', 'prestige'].sort((a, b) => state.stations[b].jury - state.stations[a].jury);
   const pos = rank.indexOf('k7');
-  const leader = rank[0];
-  const remark = pos === 0 ? 'Ihr Programm hat … Substanz. Weiter so!' : `Im Moment ist ${STATIONS[leader].name} mein Favorit für die Goldene Fernbedienung. Überzeugen Sie mich!`;
-  let html = `<div class="bubble">„${remark}“ <br><br>Am Ende von Tag ${S.SEASON_DAYS} vergibt die Jury die <b>Goldene Fernbedienung</b>. Sie mag anspruchsvolle Sendungen (Drama, Doku, Late Night) zur Primetime 20–23 Uhr, gute Kultur- und Politiknachrichten – und kleine Aufmerksamkeiten.</div>`;
-  html += `<div class="card"><div class="grow"><h3>Deine Jury-Punkte: ${Math.round(st.jury)}</h3><p>Platz ${pos + 1} von 3 ${pos === 0 ? '🥇' : pos === 1 ? '🥈' : '🥉'}</p></div></div>`;
-  html += `<p class="sec-title">Geschenke überreichen</p>`;
   const counts = {};
   st.gifts.forEach((g) => (counts[g] = (counts[g] || 0) + 1));
-  html += Object.keys(counts).length ? Object.entries(counts).map(([gid, n]) => {
-    const g = GIFTS.find((x) => x.id === gid);
-    return `<div class="card"><span style="font-size:26px">${g.icon}</span><div class="grow"><h3>${g.name} ×${n}</h3><p>+${g.jury} Jury-Punkte (weitere Geschenke am selben Tag zählen weniger)</p></div><button class="btn gold" data-act="give" data-id="${gid}">Überreichen</button></div>`;
-  }).join('') : '<p class="empty">Keine Geschenke dabei. Der Kiosk ist im Erdgeschoss.</p>';
-  return html;
+  return `<div class="card"><span style="font-size:28px">${['🥇', '🥈', '🥉'][pos]}</span><div class="grow"><h3 class="num">🏆 ${Math.round(st.jury)}</h3><div class="meta">👑 <span style="color:${STATIONS[rank[0]].color};font-weight:800">${STATIONS[rank[0]].name}</span></div></div></div>`
+    + (Object.keys(counts).length ? Object.entries(counts).map(([gid, n]) => {
+      const g = GIFTS.find((x) => x.id === gid);
+      return `<div class="card"><span style="font-size:24px">${g.icon}</span><div class="grow"><h3>${g.name} ×${n}</h3></div><button class="btn gold" data-act="give" data-id="${gid}">+${g.jury} 🏆</button></div>`;
+    }).join('') : '<p class="empty">🎁 —</p>');
 }
 
 // --- Kiosk
 function kioskBody() {
   const st = state.stations.k7;
-  let html = `<div class="bubble">„Für die Jury? Da hab ich was! Blumen gehen immer.“</div>`;
-  html += GIFTS.map((g) => `<div class="card"><span style="font-size:26px">${g.icon}</span><div class="grow"><h3>${g.name}</h3><p>Bringt der Jury +${g.jury} Punkte</p></div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="price num">${S.fmtMoney(g.price)}</span><button class="btn" data-act="gift" data-id="${g.id}" ${st.money < g.price ? 'disabled' : ''}>Kaufen</button></div></div>`).join('');
-  if (st.gifts.length) html += `<p class="empty">In deiner Tasche: ${st.gifts.map((g) => GIFTS.find((x) => x.id === g).icon).join(' ')}</p>`;
-  return html;
+  return GIFTS.map((g) => `<div class="card"><span style="font-size:24px">${g.icon}</span><div class="grow"><h3>${g.name}</h3><div class="meta">+${g.jury} 🏆</div></div><button class="btn" data-act="gift" data-id="${g.id}" ${st.money < g.price ? 'disabled' : ''}>${k(g.price)}</button></div>`).join('')
+    + (st.gifts.length ? `<p class="empty">🎒 ${st.gifts.map((g) => GIFTS.find((x) => x.id === g).icon).join(' ')}</p>` : '');
 }
 
 // --- Hausmeister Kalle
 function kalleBody() {
   const st = state.stations.k7;
-  let html = `<div class="bubble">„Na, Chef? Ich hab da so meine Methoden. Harmlos, versteht sich! Aber wenn dich jemand erwischt, ist das peinlich.“ <b>(25 % Risiko: −2 Image)</b></div>`;
-  html += PRANKS.map((p) => `<div class="card"><span style="font-size:26px">${p.icon}</span><div class="grow"><h3>${p.name} · ${S.fmtMoney(p.price)}</h3><p>${p.d}</p>
-    <div class="meta" style="margin-top:8px"><button class="btn pink" data-act="prank" data-id="${p.id}" data-target="trash" ${st.money < p.price ? 'disabled' : ''}>→ TRASH24</button><button class="btn gold" data-act="prank" data-id="${p.id}" data-target="prestige" ${st.money < p.price ? 'disabled' : ''}>→ Prestige One</button></div></div></div>`).join('');
-  html += `<p class="sec-title">Kalles Flurfunk: Was läuft heute bei der Konkurrenz?</p>`;
-  for (const sid of ['trash', 'prestige']) {
-    const s = state.stations[sid];
-    html += `<div class="card"><div class="grow"><h3 style="color:${STATIONS[sid].color}">${STATIONS[sid].name}</h3>${HOURS.map((h, hi) => {
-      const p = s.schedule[hi].prog ? state.programs[s.schedule[hi].prog] : null;
-      return `<p class="num">${hourLabel(h)} · ${p ? `${GENRES[p.g].icon} ${esc(p.t)}` : 'Testbild'}</p>`;
-    }).join('')}<p style="margin-top:4px;font-style:italic">Stand: jetzt. Die planen vielleicht noch um.</p></div></div>`;
-  }
+  let html = PRANKS.map((p) => `<div class="card"><span style="font-size:24px">${p.icon}</span><div class="grow"><h3>${p.name}</h3><div class="meta num">${k(p.price)}</div></div>
+    <button class="btn pink" data-act="prank" data-id="${p.id}" data-target="trash" ${st.money < p.price ? 'disabled' : ''}>T24</button><button class="btn gold" data-act="prank" data-id="${p.id}" data-target="prestige" ${st.money < p.price ? 'disabled' : ''}>P1</button></div>`).join('');
+  html += `<div class="spy">${['trash', 'prestige'].map((sid) => `<div><h4 style="color:${STATIONS[sid].color}">${STATIONS[sid].short}</h4>${HOURS.map((h, hi) => {
+    const p = state.stations[sid].schedule[hi].prog ? state.programs[state.stations[sid].schedule[hi].prog] : null;
+    return `<p><span class="num">${String(h % 24).padStart(2, '0')}</span> ${p ? `${GENRES[p.g].icon} ${esc(p.t)}` : '—'}</p>`;
+  }).join('')}</div>`).join('')}</div>`;
   return html;
 }
 
 // ------------------------------------------------------------------ Aktionen
 function act(a, d) {
   sfx.click();
-  const k = 'k7';
+  const me = 'k7';
   switch (a) {
-    case 'tab': officeTab = d.tab; renderPanel(); break;
+    case 'tab': tabState[d.room] = d.tab; renderPanel(); break;
+    case 'help': showHelp(openRoom); break;
     case 'pickProg': pickProgram(+d.hi); break;
     case 'pickAd': pickAd(+d.hi); break;
-    case 'buy': result(S.buyProgram(state, k, d.id)); break;
-    case 'sell': result(S.sellProgram(state, k, d.id)); break;
-    case 'acceptAd': result(S.acceptContract(state, k, d.id)); break;
-    case 'news': result(S.buyNews(state, k, d.id)); break;
-    case 'gift': result(S.buyGift(state, k, d.id)); break;
-    case 'give': { const r = S.giveGift(state, k, d.id); result({ ...r, msg: `${r.msg} +${Math.round(r.gain * 10) / 10} Jury` }); break; }
+    case 'buy': result(S.buyProgram(state, me, d.id)); break;
+    case 'sell': result(S.sellProgram(state, me, d.id)); break;
+    case 'acceptAd': result(S.acceptContract(state, me, d.id)); break;
+    case 'news': result(S.buyNews(state, me, d.id)); break;
+    case 'gift': result(S.buyGift(state, me, d.id)); break;
+    case 'give': { const r = S.giveGift(state, me, d.id); result({ ok: r.ok, msg: `+${m1(r.gain)} 🏆` }); break; }
     case 'prank': {
-      const r = S.prank(state, k, d.id, d.target);
-      result(r);
-      if (r.caught) toast('Erwischt! 😳', 'bad');
-      if (d.id === 'confetti' && ai[d.target]) { ai[d.target].stayUntil = Math.max(ai[d.target].stayUntil, state.minute + 60); }
+      const r = S.prank(state, me, d.id, d.target);
+      result({ ok: r.ok, msg: r.ok ? (r.caught ? '😳 Erwischt! −2 ⭐' : '🤫 Erledigt.') : r.msg });
+      if (r.ok && d.id === 'confetti' && ai[d.target]) ai[d.target].stayUntil = Math.max(ai[d.target].stayUntil, state.minute + 60);
       break;
     }
-    case 'loan': result(S.takeLoan(state, k)); break;
-    case 'repay': result(S.repayLoan(state, k)); break;
+    case 'loan': result(S.takeLoan(state, me)); break;
+    case 'repay': result(S.repayLoan(state, me)); break;
     case 'goal': S.bossGoal(state); renderPanel(); break;
   }
 }
@@ -569,13 +544,13 @@ function act(a, d) {
 function pickProgram(hi) {
   const st = state.stations.k7;
   const arc = S.archive(state, 'k7').map((p) => ({ p, e: S.estimate(state, 'k7', p.id, hi).total })).sort((a, b) => b.e - a.e);
-  const planned = (pid) => st.schedule.map((s, i) => (s.prog === pid && i !== hi ? hourLabel(HOURS[i]) : null)).filter(Boolean);
-  openModal(`<div class="m-head"><h2>${hourLabel(HOURS[hi])} – was läuft?</h2><p>Sortiert nach erwarteten Zuschauern. ${state.trend ? `Trend heute: ${GENRES[state.trend.g].icon} ${GENRES[state.trend.g].name}.` : ''}</p></div>
+  const planned = (pid) => st.schedule.map((s, i) => (s.prog === pid && i !== hi ? String(HOURS[i] % 24).padStart(2, '0') : null)).filter(Boolean);
+  openModal(`<div class="m-head"><h2 class="num">${hourLabel(HOURS[hi])}</h2></div>
     <div class="m-body">${arc.map(({ p, e }) => {
       const pl = planned(p.id);
-      return `<button class="slot-prog" data-pick="${p.id}"><span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta"><span class="stars">${stars(S.fitStars(state, 'k7', p.id, hi))}</span><span>Frische ${qbar(p.fresh * 100, p.fresh < 0.5 ? 'var(--warn)' : 'var(--good)')}</span>${pl.length ? `<span class="pill warn">auch um ${pl.join(', ')}</span>` : ''}</span></span><span class="est num">≈ ${S.fmtM(e)}</span></button>`;
+      return `<button class="slot-prog" data-pick="${p.id}"><span style="font-size:20px">${GENRES[p.g].icon}</span><span class="grow"><span class="t">${esc(p.t)}</span><span class="meta">${stars(S.fitStars(state, 'k7', p.id, hi))}${fbar(p.fresh)}${pl.length ? `<span class="pill warn">${pl.join(' ')}</span>` : ''}${progMeta(p)}</span></span><span class="est num">${m1(e)}</span></button>`;
     }).join('')}</div>
-    <div class="m-foot"><button class="btn alt" data-pick="">Slot leeren</button><button class="btn alt" data-close>Abbrechen</button></div>`);
+    <div class="m-foot"><button class="btn alt" data-pick="">Leeren</button><button class="btn alt" data-close>✕</button></div>`);
   $('#modal').querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
     st.schedule[hi].prog = b.dataset.pick || null;
     sfx.click();
@@ -591,12 +566,11 @@ function pickAd(hi) {
   const used = (cid) => st.schedule.filter((s, i) => s.ad === cid && i !== hi).length;
   const list = st.contracts.map((c) => {
     const v = c.group ? est.byGroup[c.group] : est.total;
-    const remaining = c.spots - c.done - used(c.id);
-    return { c, v, ok: v >= c.minM, remaining };
+    return { c, v, ok: v >= c.minM, remaining: c.spots - c.done - used(c.id) };
   });
-  openModal(`<div class="m-head"><h2>Werbung um ${hourLabel(HOURS[hi])}</h2><p>${slot.prog ? `Erwartet: ≈ ${S.fmtM(est.total)}` : 'Kein Programm geplant – Werbung im Testbild bringt nichts.'}</p></div>
-    <div class="m-body">${list.length ? list.map(({ c, v, ok, remaining }) => `<button class="slot-prog" data-ad="${c.id}" ${remaining <= 0 ? 'disabled style="opacity:.45"' : ''}><span style="font-size:20px">💼</span><span class="grow"><span class="t">${esc(c.brand)}</span><span class="meta"><span>braucht ${S.fmtM(c.minM)}${c.group ? ' ' + GROUPS[c.group].name : ''}</span><span class="pill ${ok ? 'good' : 'bad'}">${ok ? '✓ passt' : '✗ zu wenig'} (≈ ${S.fmtM(v)})</span><span>${remaining > 0 ? `${remaining} Spot${remaining > 1 ? 's' : ''} offen` : 'alle Spots verplant'}</span></span></span></button>`).join('') : '<p class="empty">Keine Verträge. Hol dir welche in der Werbeagentur (3. Stock).</p>'}</div>
-    <div class="m-foot"><button class="btn alt" data-ad="">Kein Spot</button><button class="btn alt" data-close>Abbrechen</button></div>`);
+  openModal(`<div class="m-head"><h2 class="num">💼 ${hourLabel(HOURS[hi])} · ${m1(est.total)}</h2></div>
+    <div class="m-body">${list.length ? list.map(({ c, v, ok, remaining }) => `<button class="slot-prog" data-ad="${c.id}" ${remaining <= 0 ? 'disabled style="opacity:.45"' : ''}><span class="grow"><span class="t">${esc(c.brand)}</span><span class="meta num"><span class="pill ${ok ? 'good' : 'bad'}">${c.group ? GROUPS[c.group].icon + ' ' : ''}${m1(v)} / ${m1(c.minM)}</span><span>${remaining}× offen</span></span></span></button>`).join('') : '<p class="empty">—</p>'}</div>
+    <div class="m-foot"><button class="btn alt" data-ad="">Leeren</button><button class="btn alt" data-close>✕</button></div>`);
   $('#modal').querySelectorAll('[data-ad]').forEach((b) => b.addEventListener('click', () => {
     if (b.disabled) return;
     slot.ad = b.dataset.ad || null;
@@ -623,46 +597,71 @@ function closeModal() {
 
 function showTitle() {
   const save = loadSave();
-  openModal(`<div class="title-screen"><div class="logo">Crazy<span>TV</span><em>7½</em></div>
-    <p class="tagline">Du bist neue Programmchefin oder neuer Programmchef von <b>Kanal 7½</b> – dem kleinsten Sender im Medienturm. Die Streamingdienste klauen die Zuschauer, TRASH24 und Prestige One sitzen ein paar Türen weiter. Zeig’s ihnen!</p>
-    <div class="howto">
-      <div><b>🏢</b><span>Tippe auf einen Raum oder unten auf die Leiste – deine Figur läuft hin. Der Aufzug fährt nur eine Person zur Zeit, und besetzte Räume musst du abwarten.</span></div>
-      <div><b>🎞️</b><span>Kauf Sendungen im <b>Content-Markt</b>, hol Werbeverträge in der <b>Werbeagentur</b>, Nachrichten im <b>Newsroom</b>.</span></div>
-      <div><b>📺</b><span>Plane im <b>Büro</b> den Abend von 18 bis 01 Uhr. Um 18 Uhr geht’s auf Sendung!</span></div>
-      <div><b>🏆</b><span>Ziel nach ${S.SEASON_DAYS} Tagen: Marktführer werden und die <b>Goldene Fernbedienung</b> der Jury gewinnen.</span></div>
-    </div></div>
-    <div class="m-foot" style="justify-content:center">${save && !save.over ? `<button class="btn alt" id="contBtn">Weiterspielen (Tag ${save.day})</button>` : ''}<button class="btn" id="newBtn">Neues Spiel</button></div>`, { dismiss: false });
+  openModal(`<div class="title-screen"><div class="logo">Crazy<span>TV</span><em>7½</em></div></div>
+    <div class="m-foot" style="justify-content:center;border:0">${save && !save.over ? `<button class="btn alt" id="contBtn">▶ Tag ${save.day}</button>` : ''}<button class="btn" id="newBtn">Neues Spiel</button><button class="btn alt" id="manBtn">📖 Handbuch</button></div>`, { dismiss: false });
   $('#newBtn').addEventListener('click', () => { sfx.fanfare(); clearSave(); startGame(S.newGame()); });
   $('#contBtn')?.addEventListener('click', () => { sfx.click(); startGame(save); });
+  $('#manBtn').addEventListener('click', () => showHelp(null, showTitle));
 }
 
 function openMenu() {
   if (!state) return;
   const wasSpeed = speed;
-  openModal(`<div class="m-head"><h2>Pause</h2><p>Tag ${state.day} von ${S.SEASON_DAYS}. Der Spielstand wird jeden Morgen automatisch gespeichert.</p></div>
+  openModal(`<div class="m-head"><h2>Pause · Tag ${state.day}/${S.SEASON_DAYS}</h2></div>
     <div class="m-body">
-      <button class="btn alt" id="mResume">▶ Weiterspielen</button>
+      <button class="btn alt" id="mResume">▶ Weiter</button>
+      <button class="btn alt" id="mHelp">📖 Handbuch</button>
       <button class="btn alt" id="mView">🎥 Ansicht zurücksetzen</button>
-      <button class="btn alt" id="mSound">${soundOn ? '🔊 Sound an' : '🔇 Sound aus'}</button>
-      <button class="btn alt" id="mHelp">❓ Kurzanleitung</button>
-      <button class="btn pink" id="mNew">Neues Spiel starten</button>
+      <button class="btn alt" id="mSound">${soundOn ? '🔊' : '🔇'} Sound</button>
+      <button class="btn pink" id="mNew">Neues Spiel</button>
     </div>`);
   $('#mResume').addEventListener('click', () => { closeModal(); speed = wasSpeed; });
   $('#mView').addEventListener('click', () => { world.resetView(); closeModal(); });
-  $('#mSound').addEventListener('click', () => { soundOn = !soundOn; $('#mSound').textContent = soundOn ? '🔊 Sound an' : '🔇 Sound aus'; });
-  $('#mHelp').addEventListener('click', () => { closeModal(); showHelp(); });
+  $('#mSound').addEventListener('click', () => { soundOn = !soundOn; $('#mSound').textContent = `${soundOn ? '🔊' : '🔇'} Sound`; });
+  $('#mHelp').addEventListener('click', () => showHelp());
   $('#mNew').addEventListener('click', () => { clearSave(); closeModal(); showTitle(); });
 }
 
-function showHelp() {
-  openModal(`<div class="m-head"><h2>So läuft’s</h2></div><div class="m-body howto" style="margin:0">
-    <div><b>⏱️</b><span>Ein Tag geht von 08 bis 18 Uhr. Die Zeit läuft weiter, auch wenn du in einem Raum bist. Oben rechts: Pause und doppelte Geschwindigkeit.</span></div>
-    <div><b>👥</b><span>Fünf Zielgruppen schauen zu unterschiedlichen Zeiten: Familien früh, Boomer zur Primetime, Gen Z und Nerds spät. Die Sterne im Planer zeigen, wie gut eine Sendung passt.</span></div>
-    <div><b>🔁</b><span>Wiederholungen nutzen sich ab. Achte auf die Frische deiner Sendungen.</span></div>
-    <div><b>📈</b><span>Der Newsroom verrät den Trend des Tages: Das passende Genre bringt +25 % Zuschauer.</span></div>
-    <div><b>⭐</b><span>Wer eine Stunde klar gewinnt, nimmt dem Schlechtesten einen Image-Punkt ab. Unter 5 Punkten wirst du gefeuert.</span></div>
-    <div><b>💼</b><span>Werbeverträge zahlen erst, wenn alle Spots die Mindestquote geschafft haben. Verpasste Fristen kosten Strafe.</span></div>
-  </div><div class="m-foot"><button class="btn" data-close>Alles klar</button></div>`);
+// ------------------------------------------------------------------ Handbuch
+const MANUAL = [
+  ['start', '📺 Worum geht’s', `Du leitest <b>Kanal 7½</b>, den kleinsten der drei Sender im Medienturm. Gegner: <b style="color:var(--trash)">TRASH24</b> und <b style="color:var(--prestige)">Prestige One</b>.
+    <br>Nach ${S.SEASON_DAYS} Tagen zählt: <b>Marktführer</b> (meiste ⭐ Image) und die <b>Goldene Fernbedienung</b> (meiste 🏆 Jury-Punkte).
+    <br>Gefeuert wirst du bei weniger als 5 ⭐, nach 3 Tagen im Minus oder wenn die Chefin die Geduld verliert.`],
+  ['day', '⏱️ Der Tag', `08–18 Uhr läufst du durch den Turm, die Uhr läuft dabei weiter, auch in Räumen. ▶ / ⏩ / ⏸ oben rechts, Leertaste = Tempo.
+    <br>Ziel antippen → deine Figur läuft hin. Der <b>Aufzug</b> nimmt nur eine Person mit. In einem <b>besetzten Raum</b> wartest du vor der Tür. Wer in einem Raum steht, blockiert ihn für die anderen.
+    <br>Um 18 Uhr geht dein Programm auf Sendung, danach kommt die Bilanz.`],
+  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stunden, 18–01 Uhr. Pro Stunde eine Sendung und danach ein Werbespot (💼). Leere Stunde = Testbild.
+    <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
+    <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
+    <br>Der Plan bleibt von Tag zu Tag stehen. Planen kannst du nur hier im Büro.`],
+  ['market', '🎞️ Content-Markt', `Jeden Tag neue Lizenzen. Wer zuerst kommt, kauft zuerst.
+    <br>Balken = Qualität · ⏰ beste Uhrzeit mit geschätzten Zuschauern · 🔥 Hype · 🏆 mag die Jury · 📈 Trend des Tages.
+    <br>Verkaufen bringt weniger, je abgenutzter die Sendung ist.`],
+  ['ads', '💼 Werbeagentur', `Vertrag = Spots × Mindestquote (≥ Mio., evtl. nur eine Zielgruppe) innerhalb der Frist ⏳ in Tagen.
+    <br>Ausgezahlt wird erst, wenn <b>alle</b> Spots die Quote geschafft haben. Verpasste Frist = Strafe. Max. ${S.MAX_CONTRACTS} Verträge.
+    <br>Im Planer: grüner Rand = Quote reicht voraussichtlich, gelber Rand = knapp.`],
+  ['newsroom', '📰 Newsroom', `📈 Hier erfährst du den <b>Trend des Tages</b>: Das Genre bringt +25 %.
+    <br>Bis zu ${S.MAX_NEWS} Meldungen stärken die 20-Uhr-Sendung. Ohne Nachrichten gibt es dort einen Malus. 🏛️ Politik und 🎨 Kultur bringen extra 🏆.`],
+  ['boss', '👩‍💼 Chefin', `🎯 Freiwilliges Tagesziel: geschafft = Bonus und gute Laune, verpasst = schlechte Laune. Ist sie dauerhaft 😠, bist du raus.
+    <br>🏦 Kredit in 50k-Schritten mit Zinsen pro Tag.`],
+  ['jury', '🏆 Jury', `Jury-Punkte gibt es für gute 🎭 Drama-, 🌍 Doku- und 🎙️ Late-Night-Sendungen zwischen 20 und 23 Uhr, für gute Nachrichten und für Geschenke.
+    <br>Ab dem zweiten Geschenk am selben Tag zählt jedes weniger.`],
+  ['kiosk', '🍬 Kiosk', 'Geschenke für die Jury kaufen. Überreichen musst du sie selbst in der Jury-Lounge.'],
+  ['hausmeister', '🔧 Kalle', `🎉 <b>Konfetti</b>: Das Büro des Gegners ist 1 Std. gesperrt.
+    <br>📡 <b>Antenne</b>: Beim Gegner gibt es heute zwischen 20 und 22 Uhr eine Bildstörung (−30 %).
+    <br>25 % Risiko, erwischt zu werden (−2 ⭐). Unten siehst du, was die Gegner heute geplant haben.`],
+  ['audience', '👥 Zuschauer', `📱 Gen Z und 🎮 Nerds schauen spät, 🏠 Familien früh, 📰 Boomer zur Primetime, ☕ Millennials abends.
+    <br>Wer eine Stunde deutlich gewinnt, nimmt dem Letzten 1 ⭐ ab. Ein starkes Programm vorher hält die Zuschauer für die nächste Stunde.
+    <br>Wiederholungen nutzen sich ab und erholen sich langsam. Streamingdienste und Tagesereignisse (📰 oben) verschieben alles.`],
+];
+
+function showHelp(section = null, back = null) {
+  const list = section ? MANUAL.filter(([id]) => id === section) : MANUAL;
+  openModal(`<div class="m-head"><h2>📖 ${section ? list[0][1] : 'Handbuch'}</h2></div>
+    <div class="m-body manual">${list.map(([id, t, txt]) => `${section ? '' : `<h3>${t}</h3>`}<p>${txt}</p>`).join('')}</div>
+    <div class="m-foot">${section ? '<button class="btn alt" id="hAll">📖 Alles</button>' : ''}<button class="btn" id="hOk">OK</button></div>`);
+  $('#hOk').addEventListener('click', () => { closeModal(); if (back) back(); });
+  $('#hAll')?.addEventListener('click', () => showHelp(null, back));
 }
 
 // ------------------------------------------------------------------ Sendeabend
@@ -679,8 +678,8 @@ function startEvening() {
   $('#labels').hidden = true;
   const el = $('#evening');
   el.hidden = false;
-  el.innerHTML = `<div class="ev-top"><span class="onair">ON AIR</span><span class="ev-clock num" id="evClock">18:00</span><span class="ev-watch" id="evWatch">Familie Mittelmaß macht es sich gemütlich …</span></div>
-    <div class="ev-bottom"><div class="feed" id="evFeed"></div><div id="evChans"></div><div class="ev-actions"><button class="btn alt" id="evSkip">Vorspulen ⏩</button></div></div>`;
+  el.innerHTML = `<div class="ev-top"><span class="onair">ON AIR</span><span class="ev-clock num" id="evClock">18:00</span><span class="ev-watch" id="evWatch">🛋️</span></div>
+    <div class="ev-bottom"><div class="feed" id="evFeed"></div><div id="evChans"></div><div class="ev-actions"><button class="btn alt" id="evSkip">⏩</button></div></div>`;
   $('#evSkip').addEventListener('click', () => { clearTimeout(evening.timer); showSummary(); });
   nextHour();
 }
@@ -705,7 +704,7 @@ function nextHour() {
   const myShare = H.per.k7.viewers / Math.max(0.01, sids.reduce((a, s) => a + H.per[s].viewers, 0));
   const mood = streaming ? 'bad' : famBest === 'k7' ? 'good' : myShare > 0.3 ? 'meh' : 'bad';
   world.setTv(streaming ? '#e50914' : STATIONS[famBest].color, mood);
-  $('#evWatch').textContent = streaming ? 'Familie Mittelmaß ist zu NETFLUX abgewandert …' : `Familie Mittelmaß schaut: ${STATIONS[famBest].name} – „${H.per[famBest].title}“`;
+  $('#evWatch').textContent = streaming ? '🛋️ NETFLUX' : `🛋️ ${STATIONS[famBest].short} · ${H.per[famBest].title}`;
   // Kommentare
   const feed = $('#evFeed');
   for (const s of [sids[ev.hi % 3], 'k7']) {
@@ -736,20 +735,19 @@ function showSummary() {
       <div class="hourlabels num">${res.hours.map((h) => `<span>${hourLabel(h.h).slice(0, 2)}</span>`).join('')}</div>
       <div class="tbl-wrap"><table class="res-table num"><tr><th>Sender</th><th>Zuschauer</th><th>Stunden 👑</th><th>Image</th></tr>
       ${sids.map((s) => { const x = res.summary[s]; const d = x.imageAfter - x.imageBefore; return `<tr><td style="color:${STATIONS[s].color};font-weight:800">${STATIONS[s].name}</td><td>${S.fmtM(x.viewers)}</td><td>${x.hoursWon}</td><td>${x.imageAfter} <span style="color:${d >= 0 ? 'var(--good)' : 'var(--bad)'}">(${d >= 0 ? '+' : ''}${d})</span></td></tr>`; }).join('')}</table></div>
-      <p class="sec-title">Deine Kasse</p>
       <div class="money-lines num">
-        <span>Allgemeine Werbeerlöse</span><span style="color:var(--good)">+${S.fmtMoney(k.baseIncome)}</span>
-        <span>Werbeverträge erfüllt (${k.adOk} Spots ok${k.adFail ? `, ${k.adFail} zu schwach` : ''})</span><span style="color:var(--good)">+${S.fmtMoney(k.adIncome)}</span>
-        ${k.penalties ? `<span>Vertragsstrafen</span><span style="color:var(--bad)">−${S.fmtMoney(k.penalties)}</span>` : ''}
-        <span>Betriebskosten${k.interest ? ' & Zinsen' : ''}</span><span style="color:var(--bad)">−${S.fmtMoney(k.costs)}</span>
-        ${res.bossResult?.ok ? `<span>Bonus der Chefin</span><span style="color:var(--good)">+${S.fmtMoney(res.bossResult.goal.reward)}</span>` : ''}
+        <span>Werbeerlöse</span><span style="color:var(--good)">+${S.fmtMoney(k.baseIncome)}</span>
+        <span>Verträge (${k.adOk}✓${k.adFail ? ` ${k.adFail}✗` : ''})</span><span style="color:var(--good)">+${S.fmtMoney(k.adIncome)}</span>
+        ${k.penalties ? `<span>Strafen</span><span style="color:var(--bad)">−${S.fmtMoney(k.penalties)}</span>` : ''}
+        <span>Kosten${k.interest ? ' + Zinsen' : ''}</span><span style="color:var(--bad)">−${S.fmtMoney(k.costs)}</span>
+        ${res.bossResult?.ok ? `<span>Bonus 🎯</span><span style="color:var(--good)">+${S.fmtMoney(res.bossResult.goal.reward)}</span>` : ''}
         <span class="sum">Kontostand</span><span class="sum">${S.fmtMoney(k.moneyAfter)}</span>
       </div>
       <div class="meta"><span class="pill ${imgDelta >= 0 ? 'good' : 'bad'}">Image ${imgDelta >= 0 ? '+' : ''}${imgDelta}</span><span class="pill good">Jury +${juryD}</span>${k.repeats ? `<span class="pill warn">${k.repeats}× doppelt gesendet</span>` : ''}</div>
       ${boss}
-      ${k.moneyAfter < 0 ? `<div class="bubble">⚠️ Du bist im Minus! (${state.stations.k7.negDays}/3 Tage). Nimm einen Kredit bei der Chefin oder verkaufe Sendungen.</div>` : ''}
+      ${k.moneyAfter < 0 ? `<div class="meta"><span class="pill bad">⚠️ Minus ${state.stations.k7.negDays}/3</span></div>` : ''}
     </div>
-    <div class="m-foot"><button class="btn" id="nextBtn">${state.over ? 'Weiter' : `Tag ${res.day + 1} starten`}</button></div>`, { dismiss: false });
+    <div class="m-foot"><button class="btn" id="nextBtn">${state.over ? 'Weiter' : `▶ Tag ${res.day + 1}`}</button></div>`, { dismiss: false });
   void other;
   $('#nextBtn').addEventListener('click', () => {
     sfx.click();
