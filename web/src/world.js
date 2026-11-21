@@ -16,6 +16,9 @@ const SKY = [
   [12 * 60, new THREE.Color('#9fd6ff')],
   [16 * 60, new THREE.Color('#ffd3a8')],
   [18 * 60, new THREE.Color('#f59e8b')],
+  [19.5 * 60, new THREE.Color('#6b4f8f')],
+  [21 * 60, new THREE.Color('#2a2552')],
+  [25 * 60, new THREE.Color('#141230')],
 ];
 
 export class World {
@@ -391,7 +394,11 @@ export class World {
     }
     this.scene.background.copy(c);
     this.scene.fog.color.copy(c);
-    this.sun.color.set('#fff4e0').lerp(new THREE.Color('#ffb27a'), Math.max(0, (minute - 14 * 60) / 240));
+    this.sun.color.set('#fff4e0').lerp(new THREE.Color('#ffb27a'), Math.min(1, Math.max(0, (minute - 14 * 60) / 240)));
+    const night = Math.min(1, Math.max(0, (minute - 18 * 60) / 180));
+    this.sun.intensity = 2.0 - night * 1.7;
+    this.hemi.intensity = 1.4 - night * 0.75;
+    this.hemi.color.set('#ffffff').lerp(new THREE.Color('#8f8cff'), night);
   }
 
   highlight(roomId) {

@@ -6,7 +6,8 @@ import {
 
 export const SEASON_DAYS = 14;
 export const DAY_START = 8 * 60;
-export const DAY_END = 18 * 60;
+export const AIR_START = 18 * 60;
+export const DAY_END = 25 * 60; // 01:00
 export const START_MONEY = 160000;
 export const DAILY_COST = 14000;
 export const VIEWER_REVENUE = 3000; // € pro Mio. Zuschauer (allgemeine Werbeerlöse)
@@ -214,92 +215,118 @@ export function fitStars(state, sid, pid, hi) {
 }
 
 // ------------------------------------------------------------------ Sendeabend
-export function simulateEvening(state) {
-  state.phase = 'evening';
+function ensureBroadcast(state) {
+  if (state.eve && state.eve.day === state.day) return state.eve;
   const sids = Object.keys(state.stations);
-  const hours = [];
-  const prevShare = Object.fromEntries(sids.map((s) => [s, Object.fromEntries(GROUP_KEYS.map((g) => [g, 0]))]));
-  const summary = Object.fromEntries(sids.map((s) => [s, {
-    viewers: 0, hoursWon: 0, adOk: 0, adFail: 0, adIncome: 0, penalties: 0, juryGain: 0,
-    imageBefore: state.stations[s].image, moneyBefore: state.stations[s].money, prime: 0, repeats: 0,
-  }]));
+  state.eve = {
+    day: state.day,
+    hi: -1,
+    hours: [],
+    prevShare: Object.fromEntries(sids.map((s) => [s, Object.fromEntries(GROUP_KEYS.map((g) => [g, 0]))])),
+    summary: Object.fromEntries(sids.map((s) => [s, {
+      viewers: 0, hoursWon: 0, adOk: 0, adFail: 0, adIncome: 0, penalties: 0, juryGain: 0,
+      imageBefore: state.stations[s].image, moneyBefore: state.stations[s].money, prime: 0, repeats: 0,
+    }])),
+  };
+  return state.eve;
+}
 
-  for (let hi = 0; hi < HOURS.length; hi++) {
-    const h = HOURS[hi];
-    const per = {};
-    const attrs = {};
-    for (const s of sids) {
-      const slot = state.stations[s].schedule[hi];
-      attrs[s] = {};
-      for (const g of GROUP_KEYS) attrs[s][g] = attraction(state, s, slot.prog, hi, g, prevShare[s][g]);
-    }
-    let othersTotal = 0;
-    for (const s of sids) per[s] = { viewers: 0, byGroup: {} };
-    for (const g of GROUP_KEYS) {
-      const o = othersAttr(state, g, hi);
-      const den = sids.reduce((acc, s) => acc + attrs[s][g] ** 2, 0) + o * o;
-      const pot = potential(state, g, hi);
-      for (const s of sids) {
-        const share = attrs[s][g] ** 2 / den;
-        prevShare[s][g] = share;
-        const v = pot * share;
-        per[s].byGroup[g] = v;
-        per[s].viewers += v;
-      }
-      othersTotal += pot * (o * o) / den;
-    }
-    // Werbung, Frische, Jury
-    for (const s of sids) {
-      const st = state.stations[s];
-      const slot = st.schedule[hi];
-      const P = slot.prog ? state.programs[slot.prog] : null;
-      per[s].prog = P ? P.id : null;
-      per[s].title = P ? P.t : 'Testbild';
-      per[s].genre = P ? P.g : null;
-      summary[s].viewers += per[s].viewers;
-      if (h === 20) summary[s].prime = per[s].viewers;
-      if (P) {
-        if (P.lastAiredDay === state.day) summary[s].repeats++;
-        P.lastAiredDay = state.day;
-        P.airings++;
-        P.fresh = Math.max(0.1, P.fresh - (P.k === 'film' ? 0.35 : P.k === 'serie' ? 0.12 : 0.18));
-        P.hype = Math.max(0, P.hype - 0.08);
-        if (h >= 20 && h <= 22) {
-          const jg = Math.pow(P.q / 100, 2) * GENRES[P.g].jury * 4 * (0.4 + 0.6 * P.fresh);
-          st.jury += jg;
-          summary[s].juryGain += jg;
-        }
-      }
-      if (slot.ad) {
-        const c = st.contracts.find((x) => x.id === slot.ad);
-        if (c && c.done < c.spots) {
-          const v = c.group ? per[s].byGroup[c.group] : per[s].viewers;
-          const ok = v >= c.minM;
-          per[s].ad = { brand: c.brand, ok, need: c.minM, got: v, group: c.group };
-          if (ok) {
-            c.done++;
-            summary[s].adOk++;
-            if (c.done >= c.spots) {
-              st.money += c.reward;
-              summary[s].adIncome += c.reward;
-              c.completed = true;
-            }
-          } else summary[s].adFail++;
-        }
-      }
-    }
-    // Image: Stundensieger nimmt dem Letzten einen Punkt ab
-    const ranked = sids.slice().sort((a, b) => per[b].viewers - per[a].viewers);
-    const winner = ranked[0];
-    const loser = ranked[ranked.length - 1];
-    summary[winner].hoursWon++;
-    if (state.stations[loser].image > 0 && per[winner].viewers > per[loser].viewers * 1.15) {
-      state.stations[loser].image -= 1;
-      state.stations[winner].image += 1;
-    }
-    hours.push({ h, per, others: othersTotal, winner, loser });
+/** Ist dieser Slot schon gesendet (oder läuft gerade)? */
+export function slotLocked(state, hi) {
+  return !!state.eve && state.eve.day === state.day && hi <= state.eve.hi;
+}
+
+/** Eine Sendestunde ausstrahlen (live während des Tages). */
+export function simulateHour(state, hi) {
+  const eve = ensureBroadcast(state);
+  if (hi <= eve.hi) return eve.hours[hi];
+  while (eve.hi < hi - 1) simulateHour(state, eve.hi + 1);
+  const sids = Object.keys(state.stations);
+  const { hours, prevShare, summary } = eve;
+  const h = HOURS[hi];
+  const per = {};
+  const attrs = {};
+  for (const s of sids) {
+    const slot = state.stations[s].schedule[hi];
+    attrs[s] = {};
+    for (const g of GROUP_KEYS) attrs[s][g] = attraction(state, s, slot.prog, hi, g, prevShare[s][g]);
   }
+  let othersTotal = 0;
+  for (const s of sids) per[s] = { viewers: 0, byGroup: {} };
+  for (const g of GROUP_KEYS) {
+    const o = othersAttr(state, g, hi);
+    const den = sids.reduce((acc, s) => acc + attrs[s][g] ** 2, 0) + o * o;
+    const pot = potential(state, g, hi);
+    for (const s of sids) {
+      const share = attrs[s][g] ** 2 / den;
+      prevShare[s][g] = share;
+      const v = pot * share;
+      per[s].byGroup[g] = v;
+      per[s].viewers += v;
+    }
+    othersTotal += pot * (o * o) / den;
+  }
+  // Werbung, Frische, Jury
+  for (const s of sids) {
+    const st = state.stations[s];
+    const slot = st.schedule[hi];
+    const P = slot.prog ? state.programs[slot.prog] : null;
+    per[s].prog = P ? P.id : null;
+    per[s].title = P ? P.t : 'Testbild';
+    per[s].genre = P ? P.g : null;
+    summary[s].viewers += per[s].viewers;
+    if (h === 20) summary[s].prime = per[s].viewers;
+    if (P) {
+      if (P.lastAiredDay === state.day) summary[s].repeats++;
+      P.lastAiredDay = state.day;
+      P.airings++;
+      P.fresh = Math.max(0.1, P.fresh - (P.k === 'film' ? 0.35 : P.k === 'serie' ? 0.12 : 0.18));
+      P.hype = Math.max(0, P.hype - 0.08);
+      if (h >= 20 && h <= 22) {
+        const jg = Math.pow(P.q / 100, 2) * GENRES[P.g].jury * 4 * (0.4 + 0.6 * P.fresh);
+        st.jury += jg;
+        summary[s].juryGain += jg;
+      }
+    }
+    if (slot.ad) {
+      const c = st.contracts.find((x) => x.id === slot.ad);
+      if (c && c.done < c.spots) {
+        const v = c.group ? per[s].byGroup[c.group] : per[s].viewers;
+        const ok = v >= c.minM;
+        per[s].ad = { brand: c.brand, ok, need: c.minM, got: v, group: c.group };
+        if (ok) {
+          c.done++;
+          summary[s].adOk++;
+          if (c.done >= c.spots) {
+            st.money += c.reward;
+            summary[s].adIncome += c.reward;
+            c.completed = true;
+          }
+        } else summary[s].adFail++;
+      }
+    }
+  }
+  // Image: Stundensieger nimmt dem Letzten einen Punkt ab
+  const ranked = sids.slice().sort((a, b) => per[b].viewers - per[a].viewers);
+  const winner = ranked[0];
+  const loser = ranked[ranked.length - 1];
+  summary[winner].hoursWon++;
+  if (state.stations[loser].image > 0 && per[winner].viewers > per[loser].viewers * 1.15) {
+    state.stations[loser].image -= 1;
+    state.stations[winner].image += 1;
+  }
+  const hr = { h, per, others: othersTotal, winner, loser };
+  hours.push(hr);
+  eve.hi = hi;
+  return hr;
+}
 
+/** Tagesabschluss nach 01:00 Uhr. */
+export function finishDay(state) {
+  const eve = ensureBroadcast(state);
+  for (let hi = eve.hi + 1; hi < HOURS.length; hi++) simulateHour(state, hi);
+  const sids = Object.keys(state.stations);
+  const { hours, summary } = eve;
   // News -> Jury
   for (const s of sids) {
     const st = state.stations[s];
@@ -361,10 +388,17 @@ export function simulateEvening(state) {
 
   const result = { day: state.day, hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
   state.lastResults = result;
+  state.eve = null;
   state.history.push({ day: state.day, viewers: Object.fromEntries(sids.map((s) => [s, summary[s].viewers])), image: Object.fromEntries(sids.map((s) => [s, state.stations[s].image])) });
   state.phase = 'summary';
   checkEnd(state, summary);
   return result;
+}
+
+
+export function simulateEvening(state) {
+  for (let hi = 0; hi < HOURS.length; hi++) simulateHour(state, hi);
+  return finishDay(state);
 }
 
 function headline(state, hours, summary) {
@@ -457,6 +491,7 @@ export function buyNews(state, sid, nid) {
   const n = state.news.find((x) => x.id === nid);
   if (!n) return { ok: false, msg: 'Meldung weg.' };
   if (st.newsBought.length >= MAX_NEWS) return { ok: false, msg: `Maximal ${MAX_NEWS} Meldungen pro Abend.` };
+  if (state.minute >= 20 * 60) return { ok: false, msg: '📰 ⏰ 20:00 vorbei' };
   if (st.money < n.price) return { ok: false, msg: 'Nicht genug Geld.' };
   st.money -= n.price;
   st.newsBought.push(n);
@@ -650,13 +685,16 @@ export function aiPlanSchedule(state, sid) {
   const arc = archive(state, sid);
   const used = new Set();
   const cand = [];
+  const locked = (hi) => slotLocked(state, hi);
+  st.schedule.forEach((slot, hi) => { if (locked(hi) && slot.prog) used.add(slot.prog); });
   for (const p of arc) for (let hi = 0; hi < HOURS.length; hi++) {
+    if (locked(hi)) continue;
     const e = estimate(state, sid, p.id, hi).total;
     const jury = HOURS[hi] >= 20 && HOURS[hi] <= 22 ? GENRES[p.g].jury * cfg.juryW * p.q / 60 : 0;
     cand.push({ pid: p.id, hi, score: e * (cfg.genres[p.g] || 0.9) + jury, e });
   }
   cand.sort((a, b) => b.score - a.score);
-  const filled = HOURS.map(() => null);
+  const filled = HOURS.map((_, hi) => (locked(hi) ? { pid: st.schedule[hi].prog, hi, e: 0, keep: true } : null));
   for (const c of cand) {
     if (filled[c.hi] || used.has(c.pid)) continue;
     filled[c.hi] = c;
@@ -669,7 +707,7 @@ export function aiPlanSchedule(state, sid) {
       filled[hi] = c || null;
     }
   }
-  st.schedule.forEach((slot, hi) => { slot.prog = filled[hi]?.pid || null; slot.ad = null; });
+  st.schedule.forEach((slot, hi) => { if (locked(hi)) return; slot.prog = filled[hi]?.pid || null; slot.ad = null; });
   // Werbung verteilen
   const contracts = st.contracts.slice().sort((a, b) => a.deadlineDay - b.deadlineDay);
   for (const c of contracts) {
@@ -677,7 +715,7 @@ export function aiPlanSchedule(state, sid) {
     const slots = HOURS.map((_, hi) => hi).sort((a, b) => (filled[b]?.e || 0) - (filled[a]?.e || 0));
     for (const hi of slots) {
       if (need <= 0) break;
-      if (st.schedule[hi].ad || !filled[hi]) continue;
+      if (locked(hi) || st.schedule[hi].ad || !filled[hi] || !filled[hi].pid) continue;
       const est = estimate(state, sid, filled[hi].pid, hi);
       const v = c.group ? est.byGroup[c.group] : est.total;
       if (v >= c.minM * 1.1) { st.schedule[hi].ad = c.id; need--; }

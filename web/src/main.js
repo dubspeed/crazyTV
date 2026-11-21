@@ -7,7 +7,7 @@ import {
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const MIN_PER_SEC = 600 / 165; // Tower-Phase ≈ 2:45 min bei 1×
+const MIN_PER_SEC = 4; // 08–01 Uhr ≈ 4:15 min bei 1×
 const SAVE_KEY = 'crazytv-save-v1';
 
 let state = null;
@@ -18,7 +18,6 @@ const ai = {}; // sid -> { actor, plan, stayUntil }
 let openRoom = null;
 let warned = false;
 let lastFrame = performance.now();
-let evening = null;
 let modalOpen = false;
 
 // ------------------------------------------------------------------ Sound (winzig, prozedural)
@@ -97,6 +96,7 @@ async function boot() {
 
   $('#speedBtn').addEventListener('click', toggleSpeed);
   $('#menuBtn').addEventListener('click', openMenu);
+  $('#onair').addEventListener('click', openWatch);
   $('#ticker').addEventListener('click', () => state?.event && toast(state.event.d));
   addEventListener('keydown', (e) => {
     if (e.key === ' ' && !modalOpen && state?.phase === 'morning') { e.preventDefault(); toggleSpeed(); }
@@ -124,8 +124,10 @@ function startGame(s) {
 
 function beginMorning() {
   warned = false;
+  if (watching) closeWatch();
   world.mode = 'tower';
   $('#evening').hidden = true;
+  $('#onair').hidden = true;
   $('#hud').hidden = false;
   $('#nav').hidden = false;
   $('#labels').hidden = false;
@@ -137,6 +139,7 @@ function beginMorning() {
     world.placeInRoom(ai[sid].actor, STATIONS[sid].office);
     ai[sid].plan = S.aiDayPlan(state, sid);
     ai[sid].stayUntil = state.minute + 10 + Math.random() * 25;
+    ai[sid].lateDone = false;
   }
   speed = 1;
   updateSpeedBtn();
@@ -165,13 +168,13 @@ function loop(now) {
       state.pendingNotices = [];
       renderPanel();
     }
-    if (!warned && state.minute >= S.DAY_END - 45) { warned = true; toast('⏰ 17:15'); sfx.ding(); }
-    if (state.minute >= S.DAY_END) startEvening();
+    if (!warned && state.minute >= S.AIR_START - 15) { warned = true; toast('📺 18:00 On Air'); sfx.ding(); }
+    const hi = Math.floor((state.minute - S.AIR_START) / 60);
+    for (let h = (state.eve?.day === state.day ? state.eve.hi : -1) + 1; h <= Math.min(hi, HOURS.length - 1); h++) airHour(h);
+    if (state.minute >= S.DAY_END) endDay();
     world.setTimeOfDay(state.minute);
     renderClock();
-  } else if (state && world.mode === 'tower') {
-    world.update(dt, 0, ctx());
-  } else if (world.mode === 'living') {
+  } else if (state) {
     world.update(dt, 0, ctx());
   }
   world.render();
@@ -203,6 +206,10 @@ function updateAi() {
 function nextAiRoom(sid) {
   const A = ai[sid];
   const next = A.plan.shift();
+  if (!next && !A.lateDone && state.minute >= 17 * 60 && state.minute < 21 * 60) {
+    A.lateDone = true;
+    if (Math.random() < 0.6) { A.plan = ['market', STATIONS[sid].office]; return nextAiRoom(sid); }
+  }
   if (!next) {
     if (A.actor.room !== STATIONS[sid].office) world.goTo(A.actor, STATIONS[sid].office);
     A.stayUntil = Infinity;
@@ -261,7 +268,10 @@ function setStatus(t) { $('#status').textContent = t; }
 // ------------------------------------------------------------------ HUD
 function renderClock() {
   const m = Math.floor(state.minute);
-  $('#clock').textContent = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const t = `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  $('#clock').textContent = t;
+  const ec = $('#evClock');
+  if (ec) ec.textContent = t;
   $('#clockFill').style.width = ((state.minute - S.DAY_START) / (S.DAY_END - S.DAY_START)) * 100 + '%';
 }
 
@@ -384,6 +394,14 @@ function officeBody() {
     HOURS.forEach((h, hi) => {
       const slot = st.schedule[hi];
       const p = slot.prog ? state.programs[slot.prog] : null;
+      const locked = S.slotLocked(state, hi);
+      if (locked) {
+        const r = state.eve.hours[hi].per.k7;
+        const live = hi === state.eve.hi;
+        const won = state.eve.hours[hi].winner === 'k7';
+        html += `<div class="slot${live ? ' live' : ' past'}"><div class="hr num">${hourLabel(h)}</div><div class="slot-body"><div class="slot-prog locked">${r.genre ? `<span style="font-size:20px">${GENRES[r.genre].icon}</span>` : ''}<span class="grow"><span class="t">${esc(r.title)}</span><span class="meta">${live ? '<span class="pill bad">● ON AIR</span>' : ''}${won ? '👑' : ''}${r.ad ? `<span class="pill ${r.ad.ok ? 'good' : 'bad'}">💼 ${r.ad.ok ? '✓' : '✗'}</span>` : ''}</span></span><span class="est num">${m1(r.viewers)}</span></div></div></div>`;
+        return;
+      }
       const est = p ? S.estimate(state, 'k7', p.id, hi) : null;
       const dup = p && st.schedule.findIndex((s) => s.prog === p.id) !== hi;
       let ad = `<button class="slot-ad" data-act="pickAd" data-hi="${hi}">+💼</button>`;
@@ -521,8 +539,8 @@ function act(a, d) {
   switch (a) {
     case 'tab': tabState[d.room] = d.tab; renderPanel(); break;
     case 'help': showHelp(openRoom); break;
-    case 'pickProg': pickProgram(+d.hi); break;
-    case 'pickAd': pickAd(+d.hi); break;
+    case 'pickProg': if (!S.slotLocked(state, +d.hi)) pickProgram(+d.hi); break;
+    case 'pickAd': if (!S.slotLocked(state, +d.hi)) pickAd(+d.hi); break;
     case 'buy': result(S.buyProgram(state, me, d.id)); break;
     case 'sell': result(S.sellProgram(state, me, d.id)); break;
     case 'acceptAd': result(S.acceptContract(state, me, d.id)); break;
@@ -627,9 +645,10 @@ const MANUAL = [
   ['start', '📺 Worum geht’s', `Du leitest <b>Kanal 7½</b>, den kleinsten der drei Sender im Medienturm. Gegner: <b style="color:var(--trash)">TRASH24</b> und <b style="color:var(--prestige)">Prestige One</b>.
     <br>Nach ${S.SEASON_DAYS} Tagen zählt: <b>Marktführer</b> (meiste ⭐ Image) und die <b>Goldene Fernbedienung</b> (meiste 🏆 Jury-Punkte).
     <br>Gefeuert wirst du bei weniger als 5 ⭐, nach 3 Tagen im Minus oder wenn die Chefin die Geduld verliert.`],
-  ['day', '⏱️ Der Tag', `08–18 Uhr läufst du durch den Turm, die Uhr läuft dabei weiter, auch in Räumen. ▶ / ⏩ / ⏸ oben rechts, Leertaste = Tempo.
+  ['day', '⏱️ Der Tag', `Ein Tag geht von 08 bis 01 Uhr, die Uhr läuft immer weiter, auch in Räumen. ▶ / ⏩ / ⏸ oben rechts, Leertaste = Tempo.
     <br>Ziel antippen → deine Figur läuft hin. Der <b>Aufzug</b> nimmt nur eine Person mit. In einem <b>besetzten Raum</b> wartest du vor der Tür. Wer in einem Raum steht, blockiert ihn für die anderen.
-    <br>Um 18 Uhr geht dein Programm auf Sendung, danach kommt die Bilanz.`],
+    <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Oben siehst du die Live-Quoten, 📺 schaltet ins Wohnzimmer.
+    <br>Um 01 Uhr kommt die Bilanz.`],
   ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stunden, 18–01 Uhr. Pro Stunde eine Sendung und danach ein Werbespot (💼). Leere Stunde = Testbild.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
@@ -665,61 +684,93 @@ function showHelp(section = null, back = null) {
 }
 
 // ------------------------------------------------------------------ Sendeabend
-function startEvening() {
-  closePanel();
-  closeModal();
-  setStatus('');
-  const res = S.simulateEvening(state);
-  sfx.fanfare();
-  evening = { res, hi: -1, timer: null, feed: [] };
+function startEvening() { /* ersetzt durch Live-Sendung */ }
+
+// ------------------------------------------------------------------ Live-Sendung (18–01 Uhr, Spiel läuft weiter)
+const SIDS = ['k7', 'trash', 'prestige'];
+let feedItems = [];
+
+function airHour(hi) {
+  const H = S.simulateHour(state, hi);
+  sfx.ding();
+  if (H.winner === 'k7') sfx.cash();
+  const ad = H.per.k7.ad;
+  if (ad) toast(`💼 ${ad.brand} ${ad.ok ? '✓' : '✗'}`, ad.ok ? 'good' : 'bad');
+  for (const s of [SIDS[hi % 3], 'k7']) feedItems.unshift(S.comment(state, H, s));
+  feedItems = feedItems.slice(0, 2);
+  renderOnAir();
+  renderHud();
+  if (openRoom === 'office_k7') renderPanel();
+  if (watching) renderWatch();
+}
+
+function currentHour() {
+  const e = state.eve;
+  return e && e.day === state.day && e.hi >= 0 ? e.hours[e.hi] : null;
+}
+
+function renderOnAir() {
+  const el = $('#onair');
+  const H = currentHour();
+  if (!H) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="oa-dot">${hourLabel(H.h).slice(0, 2)}</span>${SIDS.map((s) => `<span class="oa-ch" style="--c:${STATIONS[s].color}">${STATIONS[s].short} <b class="num">${m1(H.per[s].viewers)}</b>${H.winner === s ? '👑' : ''}</span>`).join('')}<span class="oa-tv">📺</span>`;
+}
+
+let watching = false;
+function openWatch() {
+  if (!currentHour()) return;
+  watching = true;
   world.mode = 'living';
+  closePanel();
   $('#hud').hidden = true;
   $('#nav').hidden = true;
   $('#labels').hidden = true;
-  const el = $('#evening');
-  el.hidden = false;
-  el.innerHTML = `<div class="ev-top"><span class="onair">ON AIR</span><span class="ev-clock num" id="evClock">18:00</span><span class="ev-watch" id="evWatch">🛋️</span></div>
-    <div class="ev-bottom"><div class="feed" id="evFeed"></div><div id="evChans"></div><div class="ev-actions"><button class="btn alt" id="evSkip">⏩</button></div></div>`;
-  $('#evSkip').addEventListener('click', () => { clearTimeout(evening.timer); showSummary(); });
-  nextHour();
+  $('#evening').hidden = false;
+  renderWatch();
 }
-
-function nextHour() {
-  const ev = evening;
-  ev.hi++;
-  if (ev.hi >= ev.res.hours.length) { ev.timer = setTimeout(showSummary, 1200); return; }
-  const H = ev.res.hours[ev.hi];
-  $('#evClock').textContent = hourLabel(H.h);
-  const sids = ['k7', 'trash', 'prestige'];
-  const max = Math.max(...sids.map((s) => H.per[s].viewers), H.others * 0.5, 1);
-  $('#evChans').innerHTML = sids.map((s) => {
-    const p = H.per[s];
-    const ad = p.ad ? `<span class="ad" style="color:${p.ad.ok ? 'var(--good)' : 'var(--bad)'}">💼 ${esc(p.ad.brand)} ${p.ad.ok ? '✓' : '✗'}</span>` : '';
-    return `<div class="chan${s === 'k7' ? ' me' : ''}"><span class="cn" style="color:${STATIONS[s].color}">${STATIONS[s].short}${H.winner === s ? ' 👑' : ''}</span><div style="min-width:0"><div class="ct">${p.genre ? GENRES[p.genre].icon : '📺'} ${esc(p.title)} ${ad}</div><div class="cb"><i style="width:${(p.viewers / max) * 100}%;background:${STATIONS[s].color}"></i></div></div><span class="cv num">${S.fmtM(p.viewers)}</span></div>`;
-  }).join('');
-  // Familie schaut den Sender mit den meisten Familien-Zuschauern – oder streamt
-  const famBest = sids.slice().sort((a, b) => H.per[b].byGroup.fam - H.per[a].byGroup.fam)[0];
-  const famTotal = sids.reduce((a, s) => a + H.per[s].byGroup.fam, 0);
+function closeWatch() {
+  watching = false;
+  world.mode = 'tower';
+  $('#evening').hidden = true;
+  $('#hud').hidden = false;
+  $('#nav').hidden = false;
+  $('#labels').hidden = false;
+}
+function renderWatch() {
+  const H = currentHour();
+  if (!H) return;
+  const max = Math.max(...SIDS.map((s) => H.per[s].viewers), 1);
+  const famBest = SIDS.slice().sort((a, b) => H.per[b].byGroup.fam - H.per[a].byGroup.fam)[0];
+  const famTotal = SIDS.reduce((a, s) => a + H.per[s].byGroup.fam, 0);
   const streaming = famTotal < 0.7;
-  const myShare = H.per.k7.viewers / Math.max(0.01, sids.reduce((a, s) => a + H.per[s].viewers, 0));
-  const mood = streaming ? 'bad' : famBest === 'k7' ? 'good' : myShare > 0.3 ? 'meh' : 'bad';
-  world.setTv(streaming ? '#e50914' : STATIONS[famBest].color, mood);
-  $('#evWatch').textContent = streaming ? '🛋️ NETFLUX' : `🛋️ ${STATIONS[famBest].short} · ${H.per[famBest].title}`;
-  // Kommentare
-  const feed = $('#evFeed');
-  for (const s of [sids[ev.hi % 3], 'k7']) {
-    const d = document.createElement('div');
-    d.innerHTML = `<small>@zuschauer${Math.floor(Math.random() * 900 + 100)}</small>${esc(S.comment(state, H, s))}`;
-    feed.prepend(d);
-  }
-  while (feed.children.length > 2) feed.lastChild.remove();
-  if (H.winner === 'k7') sfx.cash();
-  ev.timer = setTimeout(nextHour, 2800);
+  const myShare = H.per.k7.viewers / Math.max(0.01, SIDS.reduce((a, s) => a + H.per[s].viewers, 0));
+  world.setTv(streaming ? '#e50914' : STATIONS[famBest].color, streaming ? 'bad' : famBest === 'k7' ? 'good' : myShare > 0.3 ? 'meh' : 'bad');
+  $('#evening').innerHTML = `<div class="ev-top"><span class="onair">ON AIR</span><span class="ev-clock num" id="evClock"></span><span class="ev-watch">${streaming ? '🛋️ NETFLUX' : `🛋️ ${STATIONS[famBest].short} · ${esc(H.per[famBest].title)}`}</span></div>
+    <div class="ev-bottom"><div class="feed">${feedItems.map((t) => `<div><small>@zuschauer${(t.length * 37) % 900 + 100}</small>${esc(t)}</div>`).join('')}</div>
+    ${SIDS.map((s) => {
+      const p = H.per[s];
+      const ad = p.ad ? `<span class="ad" style="color:${p.ad.ok ? 'var(--good)' : 'var(--bad)'}">💼 ${p.ad.ok ? '✓' : '✗'}</span>` : '';
+      return `<div class="chan${s === 'k7' ? ' me' : ''}"><span class="cn" style="color:${STATIONS[s].color}">${STATIONS[s].short}${H.winner === s ? ' 👑' : ''}</span><div style="min-width:0"><div class="ct">${p.genre ? GENRES[p.genre].icon : '📺'} ${esc(p.title)} ${ad}</div><div class="cb"><i style="width:${(p.viewers / max) * 100}%;background:${STATIONS[s].color}"></i></div></div><span class="cv num">${m1(p.viewers)}</span></div>`;
+    }).join('')}
+    <div class="ev-actions"><button class="btn alt" id="evBack">🏢 Zurück</button></div></div>`;
+  $('#evBack').addEventListener('click', closeWatch);
+  renderClock();
 }
 
-function showSummary() {
-  const res = evening.res;
-  evening = null;
+function endDay() {
+  if (watching) closeWatch();
+  closePanel();
+  closeModal();
+  setStatus('');
+  $('#onair').hidden = true;
+  feedItems = [];
+  const res = S.finishDay(state);
+  sfx.fanfare();
+  showSummary(res);
+}
+
+function showSummary(res) {
   const k = res.summary.k7;
   const sids = ['k7', 'trash', 'prestige'];
   const maxV = Math.max(...res.hours.flatMap((h) => sids.map((s) => h.per[s].viewers)), 1);

@@ -83,16 +83,14 @@ Eine kleine, augenzwinkernde Romance-Option kann später als Nebenstrang kommen.
 
 ## 4. Kern-Gameplay
 
-### 4.1 Tagesablauf (mobilgerecht getaktet)
-Ein Spieltag dauert **ca. 4–5 Minuten Echtzeit**:
+### 4.1 Tagesablauf (durchgehende Echtzeit, wie im Original)
+Ein Spieltag läuft **ohne Unterbrechung von 08:00 bis 01:00** (ca. 4–5 Min. Echtzeit bei 1×, Pause und 2× möglich).
 
-| Phase | Uhrzeit (Ingame) | Was passiert |
-|---|---|---|
-| **Morgen im Tower** | 08:00–17:59 | Echtzeit: Räume besuchen, kaufen, verhandeln, sabotieren. Uhr läuft (~2,5 Min.). |
-| **Sendeabend** | 18:00–01:00 | Das Programm läuft. Live-Quotenkurve, Kommentare im „Social Feed“, Notfall-Eingriffe möglich (Sendung tauschen, Breaking News). Vorspulbar. |
-| **Bilanz** | – | Quoten, Geld, Image, Hype, Jury-Punkte. Schlagzeile des Tages. |
+- **08–18 Uhr:** Räume besuchen, kaufen, verhandeln, Streiche spielen.
+- **18–01 Uhr:** Das Programm läuft **live**, Stunde für Stunde, während du weiter durch den Turm läufst. Eine laufende oder gesendete Stunde ist fest. Alle späteren Stunden kannst du bis zuletzt umplanen, z. B. um 18:30 noch schnell einen Film für 20 Uhr kaufen. Live-Quoten stehen im HUD, das Wohnzimmer ist eine optionale Ansicht.
+- **01 Uhr:** Bilanz, dann der nächste Tag.
 
-Eine **Saison = 30 Tage** (Prototyp: 14 Tage). Pause jederzeit, Sitzungen also handyfreundlich kurz.
+Eine **Saison = 14 Tage**.
 
 ### 4.2 Der Tower (das räumliche Herz)
 Low-Poly-3D-Querschnitt („Puppenhaus“-Ansicht). Man tippt auf einen Raum, und die eigene Figur

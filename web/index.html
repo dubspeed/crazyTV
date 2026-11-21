@@ -63,6 +63,14 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .icon-btn.on { background: var(--warn); color: var(--ink); }
 #ticker { pointer-events: auto; align-self: flex-start; max-width: 100%; background: rgba(255, 200, 87, 0.95); color: var(--ink); border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 0; text-align: left; }
 #ticker:empty { display: none; }
+#onair { pointer-events: auto; align-self: flex-start; display: flex; gap: 6px; align-items: center; border: 0; background: rgba(23, 20, 46, 0.92); border-radius: 999px; padding: 4px 6px 4px 4px; font-size: 13px; font-weight: 800; box-shadow: 0 4px 14px rgba(0,0,0,0.25); max-width: 100%; }
+.oa-dot { background: var(--bad); color: #fff; border-radius: 999px; padding: 2px 8px; font-family: var(--display); }
+.oa-ch { color: var(--c); white-space: nowrap; }
+.oa-ch b { color: var(--text); }
+.oa-tv { padding: 0 4px; }
+.slot.past { opacity: 0.55; }
+.slot-prog.locked { cursor: default; }
+.slot.live .slot-prog { box-shadow: 0 0 0 2px var(--bad); }
 
 /* Raumleiste */
 #nav { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 10px) max(12px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
@@ -233,6 +241,7 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
       <div class="hud-card" id="imageCard"><span class="hud-label">Image <span id="juryLbl"></span></span><div class="imagebar" id="imageBar"></div><div class="imgnums num" id="imageNums"></div></div>
       <div class="ctrl"><button class="icon-btn" id="speedBtn" aria-label="Geschwindigkeit">▶</button><button class="icon-btn" id="menuBtn" aria-label="Menü">☰</button></div>
     </div>
+    <button id="onair" type="button" hidden></button>
     <button id="ticker" type="button"></button>
   </div>
   <div id="nav"><div id="status"></div><div class="chips" id="chips"></div></div>
