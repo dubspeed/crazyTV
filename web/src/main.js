@@ -1,5 +1,6 @@
 // CrazyTV – Spielschleife & Oberfläche.
 import * as S from './sim.js';
+import { drawScreen } from './tvscreen.js';
 import { World, ROOMS } from './world.js';
 import {
   STATIONS, HOURS, GENRES, GROUPS, GIFTS, PRANKS, hourLabel, BOSS_NAME, JURY_NAME,
@@ -96,7 +97,9 @@ async function boot() {
 
   $('#speedBtn').addEventListener('click', toggleSpeed);
   $('#menuBtn').addEventListener('click', openMenu);
-  $('#onair').addEventListener('click', openWatch);
+  document.querySelectorAll('.tv-ch').forEach((b) => b.addEventListener('click', () => { tvChannel = b.dataset.ch; sfx.click(); renderOnAir(); }));
+  $('#tvSofa').addEventListener('click', openWatch);
+  $('#tvCanvas').addEventListener('click', () => $('#minitv').classList.toggle('mini'));
   $('#ticker').addEventListener('click', () => state?.event && toast(state.event.d));
   addEventListener('keydown', (e) => {
     if (e.key === ' ' && !modalOpen && state?.phase === 'morning') { e.preventDefault(); toggleSpeed(); }
@@ -128,7 +131,8 @@ function beginMorning() {
   if (watching) closeWatch();
   world.mode = 'tower';
   $('#evening').hidden = true;
-  $('#onair').hidden = true;
+  $('#minitv').hidden = false;
+  renderOnAir();
   $('#hud').hidden = false;
   $('#nav').hidden = false;
   $('#labels').hidden = false;
@@ -178,6 +182,7 @@ function loop(now) {
   } else if (state) {
     world.update(dt, 0, ctx());
   }
+  updateTvs(now / 1000);
   world.render();
   requestAnimationFrame(loop);
 }
@@ -659,7 +664,7 @@ const MANUAL = [
     <br>Gefeuert wirst du bei weniger als 5 ⭐, nach 3 Tagen im Minus oder wenn die Chefin die Geduld verliert.`],
   ['day', '⏱️ Der Tag', `Ein Tag geht von 08 bis 01 Uhr, die Uhr läuft immer weiter, auch in Räumen. ▶ / ⏩ / ⏸ oben rechts, Leertaste = Tempo.
     <br>Ziel antippen → deine Figur läuft hin. Der <b>Aufzug</b> nimmt nur eine Person mit. In einem <b>besetzten Raum</b> wartest du vor der Tür. Wer in einem Raum steht, blockiert ihn für die anderen.
-    <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Oben siehst du die Live-Quoten, 📺 schaltet ins Wohnzimmer.
+    <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Der Fernseher unten links zeigt das laufende Programm. Mit den Farbknöpfen schaltest du um, 🛋️ zeigt Familie Mittelmaß, ein Tipp aufs Bild verkleinert ihn. Nachts verraten die Fenster der Stadt, wer gerade was schaut (rot = Streaming).
     <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
     <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
   ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stunden, 18–01 Uhr. Pro Stunde eine Sendung und danach ein Werbespot (💼). Leere Stunde = Testbild.
@@ -707,6 +712,8 @@ function airHour(hi) {
   const H = S.simulateHour(state, hi);
   sfx.ding();
   if (H.winner === 'k7') sfx.cash();
+  const wa = H.winner === 'k7' ? player : ai[H.winner]?.actor;
+  if (wa) world.cheer(wa);
   const me = H.per.k7;
   if (me.ad?.paid) toast(`💼 ${me.ad.brand} +${k(me.ad.paid)}`, 'good');
   else if (me.ad) toast(`💼 ${me.ad.brand} ${me.ad.ok ? '✓' : '✗'}`, me.ad.ok ? '' : 'bad');
@@ -724,12 +731,49 @@ function currentHour() {
   return e && e.day === state.day && e.hi >= 0 ? e.hours[e.hi] : null;
 }
 
-function renderOnAir() {
-  const el = $('#onair');
+// ------------------------------------------------------------------ Mini-Fernseher & Live-Bild im Turm
+let tvChannel = 'k7';
+let tvLast = 0;
+const tvG = () => $('#tvCanvas').getContext('2d');
+
+function tvInfo(sid, roomId) {
+  if (!state) return { mode: 'off' };
   const H = currentHour();
-  if (!H) { el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = `<span class="oa-dot">${hourLabel(H.h).slice(0, 2)}</span>${SIDS.map((s) => `<span class="oa-ch" style="--c:${STATIONS[s].color}">${STATIONS[s].short} <b class="num">${m1(H.per[s].viewers)}</b>${H.winner === s ? '👑' : ''}</span>`).join('')}<span class="oa-tv">📺</span>`;
+  const onAir = H && state.minute >= S.AIR_START && state.minute < S.DAY_END;
+  if (!sid) {
+    // Newsroom: zeigt den Stundensieger, vorher das eigene Testbild
+    if (!onAir) return { mode: 'test', sid: 'k7' };
+    sid = H.winner;
+  }
+  if (!onAir) return { mode: 'test', sid };
+  const p = H.per[sid];
+  if (!p.prog) return { mode: 'test', sid };
+  if (Math.floor(state.minute) % 60 >= 52 && p.ad) return { mode: 'ad', sid, brand: p.ad.brand };
+  return { mode: 'show', sid, genre: p.genre, title: p.title, crown: H.winner === sid };
+}
+
+function renderOnAir() {
+  const H = currentHour();
+  $('#tvViewers').textContent = H ? `${m1(H.per[tvChannel].viewers)} Mio${H.winner === tvChannel ? ' 👑' : ''}` : '';
+  document.querySelectorAll('.tv-ch').forEach((b) => b.classList.toggle('on', b.dataset.ch === tvChannel));
+}
+
+function updateTvs(t) {
+  if (!state) return;
+  if (t - tvLast > 0.05 && !$('#minitv').hidden) {
+    tvLast = t;
+    const c = $('#tvCanvas');
+    drawScreen(tvG(), c.width, c.height, tvInfo(tvChannel), t);
+  }
+  world.updateScreens(tvInfo, t);
+  const H = currentHour();
+  const onAir = !!H && state.minute < S.DAY_END;
+  world.setOnAir(onAir, t);
+  if (onAir) {
+    const tot = SIDS.reduce((a, s) => a + H.per[s].viewers, 0) + H.others;
+    const watch = 0.7; // Anteil der Fenster, hinter denen jemand fernsieht/streamt
+    world.setCityViewers({ k7: watch * H.per.k7.viewers / tot, trash: watch * H.per.trash.viewers / tot, prestige: watch * H.per.prestige.viewers / tot, other: watch * H.others / tot }, state.minute);
+  } else world.setCityViewers(null, state.minute);
 }
 
 let watching = false;
@@ -741,6 +785,7 @@ function openWatch() {
   $('#hud').hidden = true;
   $('#nav').hidden = true;
   $('#labels').hidden = true;
+  $('#minitv').hidden = true;
   $('#evening').hidden = false;
   renderWatch();
 }
@@ -751,6 +796,7 @@ function closeWatch() {
   $('#hud').hidden = false;
   $('#nav').hidden = false;
   $('#labels').hidden = false;
+  $('#minitv').hidden = false;
 }
 function renderWatch() {
   const H = currentHour();
@@ -778,7 +824,6 @@ function endDay() {
   closePanel();
   closeModal();
   setStatus('');
-  $('#onair').hidden = true;
   feedItems = [];
   const res = S.finishDay(state);
   sfx.fanfare();

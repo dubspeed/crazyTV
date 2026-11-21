@@ -238,10 +238,11 @@ def sofa(x, y, z, w=2.0, c="blue", flip=False):
     ]
 
 
-def tv(x, y, z, w=1.6, screen="glow"):
+def tv(x, y, z, w=1.6, screen="glow", name=None):
+    """Fernseher. Mit name wird der Bildschirm ein eigenes Objekt (das Spiel zeigt darauf live das Programm)."""
     return [
         box("tv", x, y + 1.5, z, w, w * 0.6, 0.08, "dark"),
-        box("tv_scr", x, y + 1.5, z + 0.045, w - 0.12, w * 0.6 - 0.12, 0.01, screen),
+        box(name or "tv_scr", x, y + 1.5, z + 0.045, w - 0.12, w * 0.6 - 0.12, 0.01, "screen" if name else screen),
     ]
 
 
@@ -286,7 +287,7 @@ def room_props(rid, cx, y, owner_color):
         o += monitor(cx - 0.8, y + 0.8, back + 0.8)
         o += chair(cx - 1.2, y, back + 1.8, owner_color)
         o += reel_rack(cx + 2.4, y, back + 0.1, 2.2)
-        o += tv(cx - 1.2, y + 0.6, back - 0.05, 1.8)
+        o += tv(cx - 1.2, y + 0.6, back - 0.05, 1.8, name=f"screen_{rid}")
         o += plant(cx + 3.4, y, back + 1.4, 0.9)
         o.append(box("rug", cx, y + 0.01, back + 2.0, 4.0, 0.02, 2.0, owner_color))
     elif rid == "market":
@@ -308,7 +309,7 @@ def room_props(rid, cx, y, owner_color):
     elif rid == "newsroom":
         o.append(box("newsdesk", cx - 0.8, y + 0.5, back + 1.2, 3.2, 1.0, 0.9, "blue"))
         o.append(box("newsdesk_top", cx - 0.8, y + 1.03, back + 1.2, 3.4, 0.08, 1.0, "white"))
-        o += tv(cx - 0.8, y + 0.9, back - 0.05, 2.6)
+        o += tv(cx - 0.8, y + 0.9, back - 0.05, 2.6, name="screen_newsroom")
         # Kamera auf Stativ
         cz = back + 3.2
         o.append(box("cam", cx + 2.2, y + 1.5, cz, 0.5, 0.4, 0.8, "dark"))
@@ -465,14 +466,18 @@ def build_tower():
         props += room_props(r["id"], cx, y, owner_color)
         # Deckenlampe
         props.append(cyl("ceil_lamp", cx, y + h - 0.15, -0.5, 0.35, 0.12, "lamp", verts=8))
-        j = join(props, f"room_{r['id']}")
+        screens = [o for o in props if o.name.startswith("screen_")]
+        j = join([o for o in props if o not in screens], f"room_{r['id']}")
         j.parent = root
+        for sc in screens:
+            sc.parent = root
     return root
 
 
 def build_city():
     root = empty("City")
     objs = []
+    wins = []
     for i in range(26):
         x = -60 + i * 4.8 + random.uniform(-0.8, 0.8)
         if abs(x) < 12:
@@ -482,10 +487,11 @@ def build_city():
         z = random.uniform(-16, -12)
         c = random.choice(["cityA", "cityB", "cityC"])
         objs.append(box("bld", x, h / 2 - 0.3, z, w, h, 3.5, c))
-        # Fensterreihen
-        for fy in range(2, int(h) - 1, 3):
-            if random.random() < 0.7:
-                objs.append(box("win", x, fy, z + 1.76, w * 0.7, 0.6, 0.02, "window_lit" if random.random() < 0.4 else "glass"))
+        # Fenster: einzeln (2 pro Etage), als eigenes Objekt -> das Spiel färbt sie nach Einschaltquote
+        for fy in range(2, int(h) - 1, 2):
+            for fx in (-w * 0.22, w * 0.22):
+                if random.random() < 0.85:
+                    wins.append(box("win", x + fx, fy, z + 1.76, w * 0.32, 0.8, 0.02, "window_lit"))
     for i in range(18):  # Bäume
         x = random.choice([-1, 1]) * random.uniform(13, 50)
         z = random.uniform(-9, -5)
@@ -493,6 +499,8 @@ def build_city():
         objs.append(ico("crown", x, 1.8, z, random.uniform(0.8, 1.2), random.choice(["leaf", "leaf2"]), sy=1.2))
     j = join(objs, "city_mesh")
     j.parent = root
+    wj = join(wins, "city_windows")
+    wj.parent = root
     return root
 
 

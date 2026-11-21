@@ -67,14 +67,32 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .icon-btn.on { background: var(--warn); color: var(--ink); }
 #ticker { pointer-events: auto; align-self: flex-start; max-width: 100%; background: rgba(255, 200, 87, 0.95); color: var(--ink); border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 0; text-align: left; }
 #ticker:empty { display: none; }
-#onair { pointer-events: auto; align-self: flex-start; display: flex; gap: 6px; align-items: center; border: 0; background: rgba(23, 20, 46, 0.92); border-radius: 999px; padding: 4px 6px 4px 4px; font-size: 13px; font-weight: 800; box-shadow: 0 4px 14px rgba(0,0,0,0.25); max-width: 100%; }
-.oa-dot { background: var(--bad); color: #fff; border-radius: 999px; padding: 2px 8px; font-family: var(--display); }
-.oa-ch { color: var(--c); white-space: nowrap; }
-.oa-ch b { color: var(--text); }
-.oa-tv { padding: 0 4px; }
 .slot.past { opacity: 0.55; }
 .slot-prog.locked { cursor: default; }
 .slot.live .slot-prog { box-shadow: 0 0 0 2px var(--bad); }
+
+/* Mini-Fernseher (unten links) */
+#minitv { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); width: 172px; z-index: 6; }
+.tv-case { background: linear-gradient(160deg, #4a3b2c, #2b2219); border-radius: 16px; padding: 7px 7px 5px; box-shadow: 0 8px 22px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.15); }
+#tvCanvas { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px / 14px; background: #0d0f18; cursor: pointer; box-shadow: inset 0 0 12px rgba(0,0,0,0.6); }
+.tv-ctrl { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+.tv-ch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.45); background: var(--c); opacity: 0.45; padding: 0; }
+.tv-ch.on { opacity: 1; box-shadow: 0 0 0 2px rgba(255,255,255,0.8); }
+.tv-v { flex: 1; text-align: right; font-family: var(--display); font-weight: 600; font-size: 13px; color: #f3e6cf; white-space: nowrap; }
+.tv-sofa { border: 0; background: rgba(0,0,0,0.3); border-radius: 8px; width: 26px; height: 22px; font-size: 13px; padding: 0; }
+#minitv.mini { width: 96px; }
+#minitv.mini .tv-ctrl { display: none; }
+@media (min-width: 900px) {
+  #minitv { width: 250px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+  #nav { padding-left: 280px; }
+  .tv-ch { width: 22px; height: 22px; }
+  .tv-v { font-size: 15px; }
+}
+@media (max-width: 899px) {
+  body.panel-open #minitv { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 112px); width: 150px; }
+  body.panel-open #minitv .tv-sofa { display: none; }
+  body.panel-open #ticker { display: none; }
+}
 
 /* Raumleiste */
 #nav { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 10px) max(12px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
@@ -89,7 +107,7 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 #panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 74%; display: flex; flex-direction: column; background: var(--panel); border-radius: 22px 22px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.4); transform: translateY(105%); transition: transform 0.28s cubic-bezier(.2,.9,.3,1.1); padding-bottom: env(safe-area-inset-bottom, 0px); }
 #panel.open { transform: translateY(0); }
 @media (max-width: 899px) {
-  #panel { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 62px); max-height: 80%; }
+  #panel { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 62px); max-height: calc(100% - env(safe-area-inset-top, 0px) - 230px); }
   body.panel-open #status { display: none; }
   body.panel-open #nav { background: linear-gradient(transparent, var(--panel) 30%); }
 }
@@ -245,10 +263,21 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
       <div class="hud-card" id="imageCard"><span class="hud-label">Image <span id="juryLbl"></span></span><div class="imagebar" id="imageBar"></div><div class="imgnums num" id="imageNums"></div></div>
       <div class="ctrl"><button class="icon-btn" id="speedBtn" aria-label="Geschwindigkeit">▶</button><button class="icon-btn" id="menuBtn" aria-label="Menü">☰</button></div>
     </div>
-    <button id="onair" type="button" hidden></button>
     <button id="ticker" type="button"></button>
   </div>
   <div id="nav"><div id="status"></div><div class="chips" id="chips"></div></div>
+  <div id="minitv" hidden>
+    <div class="tv-case">
+      <canvas id="tvCanvas" width="320" height="180"></canvas>
+      <div class="tv-ctrl">
+        <button class="tv-ch on" data-ch="k7" style="--c:var(--k7)" aria-label="Kanal 7½"></button>
+        <button class="tv-ch" data-ch="trash" style="--c:var(--trash)" aria-label="TRASH24"></button>
+        <button class="tv-ch" data-ch="prestige" style="--c:var(--prestige)" aria-label="Prestige One"></button>
+        <span class="tv-v num" id="tvViewers"></span>
+        <button class="tv-sofa" id="tvSofa" aria-label="Wohnzimmer">🛋️</button>
+      </div>
+    </div>
+  </div>
   <section id="panel" aria-live="polite"></section>
   <div id="evening" hidden></div>
   <div id="toasts"></div>

@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import layout from './data/layout.json';
 import glbData from '../assets/crazytv.glb';
+import { drawScreen } from './tvscreen.js';
+
+const OFFICE_SID = { office_k7: 'k7', office_trash: 'trash', office_prestige: 'prestige' };
+const STATION_COL = { k7: '#19c3b1', trash: '#ff4f9a', prestige: '#f0b429', other: '#e50914' };
 
 const L = layout;
 const FH = L.floorH;
@@ -83,6 +87,9 @@ export class World {
       if (w) { w.material = w.material.clone(); this.walls[r.id] = w; }
     }
     this._makeSign();
+    this._makeScreens(root);
+    this._makeCityWindows(city);
+    this._makeOnAirLamps();
     this._makeLabels();
     this._buildLivingScene();
     this.resize();
@@ -120,6 +127,113 @@ export class World {
     m.position.set(-4, top + 2.4, 0.72);
     this.scene.add(m);
   }
+
+  // ------------------------------------------------------------ Live-Fernseher im Turm
+  _makeScreens(root) {
+    this.screens = {};
+    root.updateMatrixWorld(true);
+    this.tower.traverse((o) => {
+      if (!o.isMesh || !o.name.startsWith('screen_')) return;
+      const roomId = o.name.replace('screen_', '').replace(/\.\d+$/, '');
+      o.geometry.computeBoundingBox();
+      const bb = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+      const size = bb.getSize(new THREE.Vector3());
+      const c = bb.getCenter(new THREE.Vector3());
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 144;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(size.x, size.y), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+      plane.position.set(c.x, c.y, bb.max.z + 0.004);
+      this.scene.add(plane);
+      o.visible = false;
+      this.screens[roomId] = { canvas, g: canvas.getContext('2d'), tex, sid: OFFICE_SID[roomId] || null };
+    });
+    this._screenT = 0;
+  }
+
+  /** info(sid|null, roomId) -> Bildinfo; wird gedrosselt (~8 fps) aufgerufen. */
+  updateScreens(info, t) {
+    if (t - this._screenT < 0.12) return;
+    this._screenT = t;
+    for (const [roomId, sc] of Object.entries(this.screens)) {
+      drawScreen(sc.g, 256, 144, info(sc.sid, roomId), t);
+      sc.tex.needsUpdate = true;
+    }
+  }
+
+  // ------------------------------------------------------------ Stadtfenster = Einschaltquote
+  _makeCityWindows(city) {
+    const mesh = city.getObjectByName('city_windows');
+    this.cityWin = null;
+    if (!mesh) return;
+    const geo = mesh.geometry;
+    const n = geo.attributes.position.count;
+    const per = 24;
+    const count = Math.floor(n / per);
+    const colors = new Float32Array(n * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    mesh.material = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    mesh.castShadow = false;
+    // feste Zufallsreihenfolge je Fenster
+    const rank = Array.from({ length: count }, (_, i) => ((Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1);
+    this.cityWin = { geo, colors, count, per, rank, key: '' };
+  }
+
+  /** shares: {k7, trash, prestige, other} Anteile 0..1 der Fenster (Rest dunkel) oder null (Tag). */
+  setCityViewers(shares, minute) {
+    const W = this.cityWin;
+    if (!W) return;
+    const key = shares ? Object.values(shares).map((v) => v.toFixed(2)).join() : 'day' + Math.floor(minute / 30);
+    if (W.key === key) return;
+    W.key = key;
+    const night = Math.min(1, Math.max(0, (minute - 17 * 60) / 120));
+    const day = new THREE.Color('#bfe3f2').lerp(new THREE.Color('#2b2d48'), night);
+    const warm = new THREE.Color('#ffe9a8');
+    const tmp = new THREE.Color();
+    const order = shares ? [['k7', shares.k7], ['trash', shares.trash], ['prestige', shares.prestige], ['other', shares.other]] : [];
+    for (let i = 0; i < W.count; i++) {
+      const r = W.rank[i];
+      tmp.copy(day);
+      if (shares) {
+        let acc = 0;
+        for (const [sid, v] of order) {
+          acc += v;
+          if (r < acc) { tmp.set(STATION_COL[sid]); break; }
+        }
+      } else if (r < night * 0.35) tmp.copy(warm);
+      for (let v = 0; v < W.per; v++) {
+        const j = (i * W.per + v) * 3;
+        W.colors[j] = tmp.r; W.colors[j + 1] = tmp.g; W.colors[j + 2] = tmp.b;
+      }
+    }
+    W.geo.attributes.color.needsUpdate = true;
+  }
+
+  // ------------------------------------------------------------ ON-AIR-Lampen über den Bürofernsehern
+  _makeOnAirLamps() {
+    const cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 48;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#b3122a'; g.fillRect(0, 0, 128, 48);
+    g.fillStyle = '#fff'; g.font = '700 30px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('ON AIR', 64, 26);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.lamps = {};
+    for (const [roomId, sid] of Object.entries(OFFICE_SID)) {
+      const r = ROOMS[roomId];
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.34), new THREE.MeshBasicMaterial({ map: tex, color: '#444', toneMapped: false }));
+      m.position.set(roomX(r) - 1.2, r.level * FH + 3.05, -L.depth / 2 + 0.25);
+      this.scene.add(m);
+      this.lamps[sid] = m;
+    }
+  }
+  setOnAir(on, t = 0) {
+    for (const m of Object.values(this.lamps || {})) m.material.color.set(on ? (Math.sin(t * 3) > -0.6 ? '#ffffff' : '#bbbbbb') : '#444444');
+  }
+
+  cheer(a) { a.cheerUntil = performance.now() / 1000 + 1.8; }
 
   _makeLabels() {
     this.labels = {};
@@ -362,6 +476,15 @@ export class World {
 
   _animate(a, t) {
     const p = a.parts;
+    if (a.cheerUntil && t < a.cheerUntil && !a.moving) {
+      const j = Math.abs(Math.sin(t * 9));
+      a.obj.position.y = (a.state === 'riding' || a.state === 'boarding' ? this.cab.y : a.level * FH) + j * 0.35;
+      a.cheered = true;
+      p.ArmL.rotation.x = -2.8 + Math.sin(t * 14) * 0.3;
+      p.ArmR.rotation.x = -2.8 - Math.sin(t * 14) * 0.3;
+      a.obj.rotation.y += (0 - a.obj.rotation.y) * 0.3;
+      return;
+    }
     const target = a.facing;
     let d = target - a.obj.rotation.y;
     while (d > Math.PI) d -= Math.PI * 2;
@@ -375,6 +498,7 @@ export class World {
       p.ArmR.rotation.x = s * 0.5;
       a.obj.position.y += Math.abs(s) * 0.08;
     } else {
+      if (a.cheered) { a.cheered = false; this._place(a); }
       p.LegL.rotation.x *= 0.8; p.LegR.rotation.x *= 0.8;
       const idle = a.state === 'waitRoom' || a.state === 'waitElevator' ? Math.sin(t * 6 + a.phase) * 0.15 : 0;
       p.ArmL.rotation.x = p.ArmL.rotation.x * 0.8 + idle;
