@@ -10,6 +10,7 @@ export const AIR_START = 18 * 60;
 export const DAY_END = 25 * 60; // 01:00
 export const START_MONEY = 160000;
 export const DAILY_COST = 14000;
+export const OUTAGE_FINE = 10000; // € je Testbild-Stunde
 export const VIEWER_REVENUE = 3000; // € pro Mio. Zuschauer (allgemeine Werbeerlöse)
 export const MAX_CONTRACTS = 4;
 export const MAX_NEWS = 3;
@@ -52,7 +53,7 @@ export function book(state, sid, amount, kind, label = '') {
 export const JOURNAL_KINDS = {
   base: 'Werbeerlöse', ad: 'Werbeverträge', bonus: 'Bonus 🎯', sell: 'Verkäufe', loan: 'Kredit',
   buy: 'Einkäufe', news: 'Nachrichten', gift: 'Geschenke', prank: 'Streiche', penalty: 'Strafen',
-  cost: 'Betriebskosten', interest: 'Zinsen', repay: 'Tilgung',
+  cost: 'Betriebskosten', interest: 'Zinsen', repay: 'Tilgung', outage: 'Sendeausfall',
 };
 export function journalSum(state, sid = 'k7') {
   const out = {};
@@ -263,7 +264,7 @@ function ensureBroadcast(state) {
     prevShare: Object.fromEntries(sids.map((s) => [s, Object.fromEntries(GROUP_KEYS.map((g) => [g, 0]))])),
     summary: Object.fromEntries(sids.map((s) => [s, {
       viewers: 0, hoursWon: 0, adOk: 0, adFail: 0, adIncome: 0, penalties: 0, juryGain: 0,
-      imageBefore: state.stations[s].image, moneyBefore: state.stations[s].money, prime: 0, repeats: 0,
+      imageBefore: state.stations[s].image, moneyBefore: state.stations[s].money, prime: 0, repeats: 0, outages: 0,
     }])),
   };
   return state.eve;
@@ -381,6 +382,14 @@ export function simulateHour(state, hi) {
     state.stations[loser].image -= 1;
     state.stations[winner].image += 1;
   }
+  // Sendeausfall (Testbild): Bußgeld der Medienaufsicht + Image-Verlust an den Stundensieger
+  for (const s of sids) {
+    if (state.stations[s].schedule[hi].prog) continue;
+    per[s].outage = true;
+    summary[s].outages++;
+    book(state, s, -OUTAGE_FINE, 'outage', hourLabel(h));
+    if (s !== winner && state.stations[s].image > 0) { state.stations[s].image -= 1; state.stations[winner].image += 1; }
+  }
   const hr = { h, per, others: othersTotal, winner, loser };
   hours.push(hr);
   eve.hi = hi;
@@ -459,6 +468,9 @@ export function finishDay(state) {
     } else state.boss.mood -= 1;
     bossResult = { ok, goal, val };
   }
+  // Mehrere Sendeausfälle verärgern die Chefin
+  const outageAnger = summary.k7.outages >= 2;
+  if (outageAnger) state.boss.mood -= 1;
 
   for (const s of sids) {
     const st = state.stations[s];
@@ -474,7 +486,7 @@ export function finishDay(state) {
     else p.fresh = Math.min(1, p.fresh + 0.08);
   }
 
-  const result = { day: state.day, journal: journalSum(state, 'k7'), hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
+  const result = { outageAnger, day: state.day, journal: journalSum(state, 'k7'), hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
   state.lastResults = result;
   state.eve = null;
   state.history.push({ day: state.day, viewers: Object.fromEntries(sids.map((s) => [s, summary[s].viewers])), image: Object.fromEntries(sids.map((s) => [s, state.stations[s].image])) });

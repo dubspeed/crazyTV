@@ -890,7 +890,7 @@ const MANUAL = [
     <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Der Fernseher unten links zeigt das laufende Programm. Mit den Farbknöpfen schaltest du um, 🛋️ zeigt Familie Mittelmaß, ein Tipp aufs Bild verkleinert ihn. Nachts verraten die Fenster der Stadt, wer gerade was schaut (rot = Streaming).
     <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
     <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
-  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild.
+  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild = Sendeausfall: −1 ⭐ und ${k(S.OUTAGE_FINE)} Bußgeld pro Stunde, ab 2 Ausfällen am Tag wird die Chefin sauer.
     <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen.
     <br><b>Antippen</b> (Regal oder Block): Infokarte mit Werten, Zielgruppen und erwarteter Quote je Startzeit. Startzeit antippen = dort einplanen (↩ = verdrängt etwas).
     <br>Werbevertrag auf einen Werbeplatz rechts ziehen, antippen = wieder frei.
@@ -940,6 +940,7 @@ function airHour(hi) {
   const H = S.simulateHour(state, hi);
   sfx.ding();
   if (H.winner === 'k7') sfx.cash();
+  if (H.per.k7.outage) { toast(`📺 Sendeausfall! −1 ⭐ −${k(S.OUTAGE_FINE)}`, 'bad'); sfx.bad(); }
   const wa = H.winner === 'k7' ? player : ai[H.winner]?.actor;
   if (wa) world.cheer(wa);
   for (const s of [SIDS[hi % 3], 'k7']) feedItems.unshift(S.comment(state, H, s));
@@ -1102,7 +1103,7 @@ function showSummary(res) {
         ${Object.keys(S.JOURNAL_KINDS).filter((kd) => res.journal[kd]).map((kd) => `<span>${S.JOURNAL_KINDS[kd]}${kd === 'ad' ? ` (${ks.adOk}✓${ks.adFail ? ` ${ks.adFail}✗` : ''})` : ''}</span><span style="color:${res.journal[kd] >= 0 ? 'var(--good)' : 'var(--bad)'}">${res.journal[kd] >= 0 ? '+' : ''}${S.fmtMoney(res.journal[kd])}</span>`).join('')}
         <span class="sum">Kontostand</span><span class="sum">${S.fmtMoney(ks.moneyAfter)}</span>
       </div>
-      <div class="meta"><span class="pill ${imgDelta >= 0 ? 'good' : 'bad'}">Image ${imgDelta >= 0 ? '+' : ''}${imgDelta}</span><span class="pill good">Jury +${juryD}</span>${ks.repeats ? `<span class="pill warn">${ks.repeats}× doppelt gesendet</span>` : ''}</div>
+      <div class="meta"><span class="pill ${imgDelta >= 0 ? 'good' : 'bad'}">Image ${imgDelta >= 0 ? '+' : ''}${imgDelta}</span><span class="pill good">Jury +${juryD}</span>${ks.repeats ? `<span class="pill warn">${ks.repeats}× doppelt gesendet</span>` : ''}${ks.outages ? `<span class="pill bad">📺 ${ks.outages}× Testbild</span>` : ''}${res.outageAnger ? '<span class="pill bad">👩‍💼 😠</span>' : ''}</div>
       ${boss}
       ${ks.moneyAfter < 0 ? `<div class="meta"><span class="pill bad">⚠️ Minus ${state.stations.k7.negDays}/3</span></div>` : ''}
     </div>
