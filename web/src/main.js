@@ -113,7 +113,7 @@ async function boot() {
 }
 
 function loadSave() {
-  try { const s = localStorage.getItem(SAVE_KEY); const st = s ? S.deserialize(s) : null; return st && st.version === 2 ? st : null; } catch { return null; }
+  try { const s = localStorage.getItem(SAVE_KEY); const st = s ? S.deserialize(s) : null; return st && st.version === 3 ? st : null; } catch { return null; }
 }
 function writeSave() {
   try { localStorage.setItem(SAVE_KEY, S.serialize(state)); } catch { /* Speicher nicht verfügbar */ }
@@ -129,6 +129,7 @@ function startGame(s) {
 
 function beginMorning() {
   warned = false;
+  viewDay = state.day;
   if (watching) closeWatch();
   world.mode = 'tower';
   $('#evening').hidden = true;
@@ -539,7 +540,8 @@ function act(a, d) {
   switch (a) {
     case 'tab': tabState[d.room] = d.tab; renderPanel(); break;
     case 'help': showHelp(openRoom); break;
-    case 'adClear': if (!S.adLocked(state, +d.hi)) { state.stations.k7.schedule[+d.hi].ad = null; renderPanel(); } break;
+    case 'adClear': S.setAd(state, 'k7', +d.hi, null, viewDay); renderPanel(); break;
+    case 'day': viewDay = Math.max(state.day, Math.min(state.day + S.PLAN_DAYS, S.SEASON_DAYS, viewDay + +d.d)); renderPanel(); break;
     case 'buy': result(S.buyProgram(state, me, d.id)); break;
     case 'sell': result(S.sellProgram(state, me, d.id)); break;
     case 'acceptAd': result(S.acceptContract(state, me, d.id)); break;
@@ -561,62 +563,98 @@ function act(a, d) {
 // ------------------------------------------------------------------ Programmplaner mit Drag & Drop
 const ROW = 44;
 
+let viewDay = 1; // im Planer angezeigter Tag
+
+function dayLabel(d) {
+  if (d === state.day) return 'Heute';
+  if (d === state.day + 1) return 'Morgen';
+  return `Tag ${d}`;
+}
+
 function plannerHtml() {
   const st = state.stations.k7;
-  const eve = state.eve && state.eve.day === state.day ? state.eve : null;
+  if (viewDay < state.day) viewDay = state.day;
+  const vd = viewDay;
+  const today = vd === state.day;
+  const eve = today && state.eve && state.eve.day === state.day ? state.eve : null;
+  const plan = S.planFor(state, 'k7', vd);
+  const maxDay = Math.min(state.day + S.PLAN_DAYS, S.SEASON_DAYS);
   let tl = '';
   HOURS.forEach((h, hi) => {
     tl += `<div class="tl-row${h >= 20 && h <= 22 ? ' prime' : ''}" style="top:${hi * ROW}px"><span class="num">${hourLabel(h).slice(0, 2)}</span></div>`;
-    const inst = S.instanceAt(state, 'k7', hi);
-    if (!inst && S.cellLocked(state, 'k7', hi)) tl += `<div class="tl-block testbild" style="top:${hi * ROW + 2}px;height:${ROW - 4}px">📺</div>`;
+    const inst = S.instanceAt(state, 'k7', hi, vd);
+    if (!inst && S.cellLocked(state, 'k7', hi, vd)) tl += `<div class="tl-block testbild" style="top:${hi * ROW + 2}px;height:${ROW - 4}px">📺</div>`;
     if (inst && inst.start === hi) {
       const p = state.programs[inst.pid];
-      const locked = S.cellLocked(state, 'k7', hi);
+      const locked = S.cellLocked(state, 'k7', hi, vd);
       const liveNow = eve && eve.hi >= inst.start && eve.hi < inst.start + inst.len;
       const past = eve && eve.hi >= inst.start + inst.len - 1 && !liveNow;
-      let v;
+      let v, epTxt = '';
       if (eve && eve.hi >= inst.start) {
-        const vs = eve.hours.slice(inst.start, Math.min(eve.hi, inst.start + inst.len - 1) + 1).map((H) => H.per.k7.viewers);
-        v = vs.reduce((a, b) => a + b, 0) / vs.length;
-      } else v = S.estimateBlock(state, 'k7', p.id, hi);
+        const hs = eve.hours.slice(inst.start, Math.min(eve.hi, inst.start + inst.len - 1) + 1);
+        v = hs.reduce((a, H) => a + H.per.k7.viewers, 0) / hs.length;
+        const pk = hs[0].per.k7;
+        if (pk.eps) epTxt = `${pk.ep}/${pk.eps}`;
+      } else {
+        v = S.estimateBlock(state, 'k7', p.id, hi, vd);
+        if (p.eps) epTxt = `${S.expectedEpisode(state, 'k7', p.id, vd, hi) + 1}/${p.eps}`;
+      }
       const won = eve && eve.hours.slice(inst.start, inst.start + inst.len).some((H) => H.winner === 'k7');
-      const dup = st.schedule.some((c, i) => c.prog === p.id && c.part === 0 && i !== hi);
+      const dup = plan.some((c, i) => c.prog === p.id && c.part === 0 && i !== hi);
+      const bond = p.eps ? S.bondFor(state, p, hi, vd) : 0;
       tl += `<div class="tl-block g-${p.g}${liveNow ? ' live' : ''}${past ? ' past' : ''}" ${locked ? '' : `data-drag="inst" data-start="${hi}" data-pid="${p.id}"`} style="top:${hi * ROW + 2}px;height:${inst.len * ROW - 4}px">
         <span class="tb-i">${GENRES[p.g].icon}</span><span class="tb-t">${esc(p.t)}</span>
-        <span class="tb-m">${liveNow ? '<b class="onair-dot">●</b>' : ''}${won ? '👑' : ''}${dup ? '<b class="bad">2×</b>' : ''}${!locked && p.fresh < 0.5 ? '🥱' : ''}<span class="num">${m1(v)}</span></span></div>`;
+        <span class="tb-m">${epTxt ? `<b class="ep">${epTxt}</b>` : ''}${bond > 0.3 ? '<b title="Stammpublikum">👥</b>' : ''}${liveNow ? '<b class="onair-dot">●</b>' : ''}${won ? '👑' : ''}${dup && !p.eps ? '<b class="bad">2×</b>' : ''}${!locked && p.fresh < 0.5 ? '🥱' : ''}<span class="num">${m1(v)}</span></span></div>`;
     }
     tl += `<div class="tl-ad" data-hi="${hi}" style="top:${hi * ROW + 2}px">${adCell(hi)}</div>`;
   });
   tl += '<div class="tl-prev" id="tlPrev" hidden></div>';
-  // Regal: Sendungen
   const arc = S.archive(state, 'k7').sort((a, b) => b.q - a.q);
   const shelfP = arc.map((p) => {
-    const used = st.schedule.some((c) => c.prog === p.id);
-    return `<div class="shelf-card g-${p.g}${used ? ' used' : ''}" data-drag="prog" data-pid="${p.id}" style="--len:${S.progLen(p)}"><span class="tb-i">${GENRES[p.g].icon}</span><span class="tb-t">${esc(p.t)}</span><span class="sc-m">${'▮'.repeat(S.progLen(p))}${p.fresh < 0.5 ? ' 🥱' : ''}</span></div>`;
+    const used = plan.some((c) => c.prog === p.id);
+    const ep = p.eps ? ` · ${p.epNext + 1}/${p.eps}` : '';
+    return `<div class="shelf-card g-${p.g}${used ? ' used' : ''}" data-drag="prog" data-pid="${p.id}"><span class="tb-i">${GENRES[p.g].icon}</span><span class="tb-t">${esc(p.t)}</span><span class="sc-m">${'▮'.repeat(S.progLen(p))}${ep}${p.fresh < 0.5 ? ' 🥱' : ''}</span></div>`;
   }).join('');
-  // Regal: Werbeverträge
   const shelfA = st.contracts.map((c) => {
-    const left = c.spots - c.done - st.schedule.filter((sl, hi) => sl.ad === c.id && !S.adLocked(state, hi)).length;
-    return `<div class="ad-chip${left <= 0 ? ' used' : ''}" ${left > 0 ? `data-drag="ad" data-cid="${c.id}"` : ''}>💼 ${esc(c.brand)} <b>${left}</b><small>${c.group ? GROUPS[c.group].icon : ''}≥${m1(c.minM)}</small></div>`;
+    const left = adSpotsLeft(c);
+    const valid = c.deadlineDay >= vd;
+    return `<div class="ad-chip${left <= 0 || !valid ? ' used' : ''}" ${left > 0 && valid ? `data-drag="ad" data-cid="${c.id}"` : ''}>💼 ${esc(c.brand)} <b>${left}</b><small>${c.group ? GROUPS[c.group].icon : ''}≥${m1(c.minM)} ⏳${c.deadlineDay - state.day + 1}</small></div>`;
   }).join('');
-  return `<div class="tl" id="tl" style="height:${HOURS.length * ROW}px">${tl}</div>
+  const own = S.hasOwnPlan(state, 'k7', vd);
+  return `<div class="dayswitch"><button class="btn alt" data-act="day" data-d="-1" ${vd <= state.day ? 'disabled' : ''}>◀</button><b>${dayLabel(vd)}</b>${!own ? '<span class="pill">= Vortag</span>' : ''}<button class="btn alt" data-act="day" data-d="1" ${vd >= maxDay ? 'disabled' : ''}>▶</button></div>
+    <div class="tl" id="tl" style="height:${HOURS.length * ROW}px">${tl}</div>
     <div class="shelf" id="shelf">${shelfP || '<span class="empty">—</span>'}</div>
     ${shelfA ? `<div class="shelf ads">${shelfA}</div>` : ''}`;
 }
 
-function adCell(hi) {
+/** Noch nicht verplante Spots eines Vertrags (heute ungesendet + eigene Zukunftspläne). */
+function adSpotsLeft(c) {
   const st = state.stations.k7;
-  const eve = state.eve && state.eve.day === state.day ? state.eve : null;
+  let used = st.schedule.filter((sl, hi) => sl.ad === c.id && !S.adLocked(state, hi)).length;
+  for (const plan of Object.values(st.future || {})) used += plan.filter((sl) => sl.ad === c.id).length;
+  return c.spots - c.done - used;
+}
+
+function adCell(hi) {
+  const vd = viewDay;
+  const today = vd === state.day;
+  const st = state.stations.k7;
+  const eve = today && state.eve && state.eve.day === state.day ? state.eve : null;
   if (eve && (eve.adDone ?? -1) >= hi) {
     const r = eve.hours[hi].per.k7.ad;
     return r ? `<span class="ac ${r.ok ? 'ok' : 'bad'}">${r.ok ? `✓${k(r.paid)}` : '✗'}</span>` : '';
   }
-  const c = st.schedule[hi].ad && st.contracts.find((x) => x.id === st.schedule[hi].ad);
-  if (!c) return S.adLocked(state, hi) ? '' : '<span class="ac empty">💼</span>';
-  if (S.adLocked(state, hi)) return `<span class="ac live">● ${esc(c.brand)}</span>`;
-  const inst = S.instanceAt(state, 'k7', hi);
-  const v = inst ? (eve && eve.hi >= hi ? eve.hours[hi].per.k7 : S.estimate(state, 'k7', inst.pid, hi, hi > inst.start)) : null;
-  const val = v ? (c.group ? v.byGroup[c.group] : (v.total ?? v.viewers)) : 0;
+  const cid = S.planFor(state, 'k7', vd)[hi].ad;
+  const c = cid && st.contracts.find((x) => x.id === cid);
+  const locked = today && S.adLocked(state, hi);
+  if (!c) return locked ? '' : '<span class="ac empty">💼</span>';
+  if (locked) return `<span class="ac live">● ${esc(c.brand)}</span>`;
+  const inst = S.instanceAt(state, 'k7', hi, vd);
+  let val = 0;
+  if (inst) {
+    if (eve && eve.hi >= hi) { const pv = eve.hours[hi].per.k7; val = c.group ? pv.byGroup[c.group] : pv.viewers; }
+    else { const e = S.estimate(state, 'k7', inst.pid, hi, hi > inst.start, { future: !today }); val = c.group ? e.byGroup[c.group] : e.total; }
+  }
   return `<span class="ac set ${val >= c.minM ? 'ok' : 'risk'}" data-act="adClear" data-hi="${hi}">${esc(c.brand)}</span>`;
 }
 
@@ -701,6 +739,7 @@ function dragOver(x, y) {
   const tl = $('#tl');
   const prev = $('#tlPrev');
   if (!tl) return;
+  const vd = viewDay;
   const r = tl.getBoundingClientRect();
   const inside = x >= r.left - 20 && x <= r.right + 20 && y >= r.top - ROW / 2 && y <= r.bottom + ROW / 2;
   $('#shelf')?.classList.toggle('trash', drag.kind === 'inst' && !inside);
@@ -709,50 +748,54 @@ function dragOver(x, y) {
   if (!inside) { prev.hidden = true; return; }
   if (drag.kind === 'ad') {
     const hi = Math.max(0, Math.min(HOURS.length - 1, Math.floor((y - r.top) / ROW)));
-    const ok = !S.adLocked(state, hi) && !!state.stations.k7.schedule[hi].prog;
+    const ok = !(vd === state.day && S.adLocked(state, hi)) && !!S.planFor(state, 'k7', vd)[hi].prog;
     prev.hidden = true;
     if (ok) { tl.querySelector(`.tl-ad[data-hi="${hi}"]`).classList.add('drop'); drag.target = hi; }
     return;
   }
   const len = S.progLen(state.programs[drag.pid]);
   const hi = Math.max(0, Math.min(HOURS.length - len, Math.floor((y - r.top) / ROW) - drag.grab));
-  const fits = S.dropFits(state, 'k7', drag.pid, hi, drag.kind === 'inst' ? drag.start : null);
+  const fits = S.dropFits(state, 'k7', drag.pid, hi, drag.kind === 'inst' ? drag.start : null, vd);
   prev.hidden = false;
   prev.className = 'tl-prev ' + (fits ? 'ok' : 'no');
   prev.style.top = hi * ROW + 2 + 'px';
   prev.style.height = len * ROW - 4 + 'px';
-  prev.textContent = fits ? `${hourLabel(HOURS[hi]).slice(0, 2)} · ≈ ${m1(S.estimateBlock(state, 'k7', drag.pid, hi))}` : '🔒';
+  prev.textContent = fits ? `${hourLabel(HOURS[hi]).slice(0, 2)} · ≈ ${m1(S.estimateBlock(state, 'k7', drag.pid, hi, vd))}` : '🔒';
   drag.target = fits ? hi : null;
 }
 
 function dropAt(d) {
-  const st = state.stations.k7;
+  const vd = viewDay;
   if (d.kind === 'ad') {
-    if (d.target !== null) { st.schedule[d.target].ad = d.cid; sfx.click(); }
+    if (d.target !== null) { const r = S.setAd(state, 'k7', d.target, d.cid, vd); r.ok ? sfx.click() : sfx.bad(); }
     return;
   }
   if (d.target === null) {
-    if (d.kind === 'inst' && $('#shelf')?.classList.contains('trash')) { S.removeAt(state, 'k7', d.start); sfx.click(); }
+    if (d.kind === 'inst' && $('#shelf')?.classList.contains('trash')) { S.removeAt(state, 'k7', d.start, vd); sfx.click(); }
     $('#shelf')?.classList.remove('trash');
     return;
   }
-  const r = S.dropProgram(state, 'k7', d.pid, d.target, d.kind === 'inst' ? d.start : null);
+  const r = S.dropProgram(state, 'k7', d.pid, d.target, d.kind === 'inst' ? d.start : null, vd);
   if (r.ok) { sfx.click(); if (r.bumped.length) toast(`↩ ${r.bumped.map((pid) => state.programs[pid].t).join(', ')}`); }
   else sfx.bad();
 }
 
 function showProgInfo(pid, placedStart = null) {
+  const vd = viewDay;
   const p = state.programs[pid];
   const len = S.progLen(p);
   const G = GENRES[p.g];
   const starts = HOURS.map((h, hi) => {
     if (hi + len > HOURS.length) return null;
-    return { hi, e: S.estimateBlock(state, 'k7', pid, hi), ok: S.dropFits(state, 'k7', pid, hi, placedStart), free: S.canPlace(state, 'k7', pid, hi, placedStart) };
+    return { hi, e: S.estimateBlock(state, 'k7', pid, hi, vd), ok: S.dropFits(state, 'k7', pid, hi, placedStart, vd), free: S.canPlace(state, 'k7', pid, hi, placedStart, vd) };
   });
   const max = Math.max(...starts.filter(Boolean).map((x) => x.e), 0.1);
   const best = starts.filter((x) => x && x.ok).sort((a, b) => b.e - a.e)[0];
+  const dailyAt = placedStart ?? best?.hi;
   const aired = p.airings ? `${p.airings}×` : 'neu';
-  const trend = trendKnown() && state.trend.g === p.g;
+  const trend = vd === state.day && trendKnown() && state.trend.g === p.g;
+  const series = p.eps ? `<div class="pi-eps">${p.epFresh.map((f, i) => `<i class="${i === p.epNext ? 'next' : ''}" style="--f:${f}" title="Folge ${i + 1}"></i>`).join('')}</div>
+      <div class="meta"><span class="pill">📺 Folge ${p.epNext + 1}/${p.eps} als Nächstes</span>${p.season ? `<span class="pill warn">Wdh. ×${p.season}</span>` : ''}${dailyAt !== undefined ? `<span class="pill">👥 ${Math.round(S.bondFor(state, p, dailyAt, vd) * 100)} %</span>` : ''}</div>` : '';
   openModal(`<div class="m-head pi-head g-${p.g}"><span class="pi-icon">${G.icon}</span><div style="min-width:0"><h2>${esc(p.t)}</h2><p>${esc(p.d || '')}</p></div></div>
     <div class="m-body">
       <div class="pi-stats">
@@ -765,16 +808,21 @@ function showProgInfo(pid, placedStart = null) {
         <div><small>Gesendet</small><b>${aired}</b></div>
         <div><small>Wert</small><b>${k(S.sellPrice(state, pid))}</b></div>
       </div>
+      ${series}
       <div class="pi-groups">${GROUP_KEYS.map((g, i) => `<div><span>${GROUPS[g].icon}</span>${qbar(G.pref[i] * 100, 'var(--k7)')}</div>`).join('')}</div>
-      <div class="meta">${G.peak.map((h) => `<span class="pill">⏰ ${hourLabel(h).slice(0, 2)}</span>`).join('')}${trend ? '<span class="pill good">📈 Trend</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</div>
+      <div class="meta"><span class="pill">📅 ${dayLabel(vd)}</span>${G.peak.map((h) => `<span class="pill">⏰ ${hourLabel(h).slice(0, 2)}</span>`).join('')}${trend ? '<span class="pill good">📈 Trend</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</div>
       <div class="pi-hours">${starts.map((x, hi) => x ? `<button class="pi-h${x.ok ? '' : ' no'}${best && best.hi === hi ? ' best' : ''}${placedStart === hi ? ' cur' : ''}" data-at="${hi}" ${x.ok ? '' : 'disabled'}><i style="height:${(x.e / max) * 100}%"></i><b class="num">${m1(x.e)}</b><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span>${x.ok && !x.free ? '<em>↩</em>' : ''}</button>` : `<div class="pi-h none"><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span></div>`).join('')}</div>
     </div>
-    <div class="m-foot">${placedStart !== null && !S.cellLocked(state, 'k7', placedStart) ? '<button class="btn pink" data-at="x">✕</button>' : ''}<button class="btn alt" data-close>OK</button></div>`);
+    <div class="m-foot">${placedStart !== null && !S.cellLocked(state, 'k7', placedStart, vd) ? '<button class="btn pink" data-at="x">✕</button>' : ''}${p.eps && dailyAt !== undefined ? `<button class="btn gold" data-at="daily">🔁 Täglich ${hourLabel(HOURS[dailyAt]).slice(0, 2)} Uhr</button>` : ''}<button class="btn alt" data-close>OK</button></div>`);
   $('#modal').querySelectorAll('[data-at]').forEach((b) => b.addEventListener('click', () => {
     if (b.disabled) return;
-    if (b.dataset.at === 'x') S.removeAt(state, 'k7', placedStart);
-    else {
-      const r = S.dropProgram(state, 'k7', pid, +b.dataset.at, placedStart);
+    if (b.dataset.at === 'x') S.removeAt(state, 'k7', placedStart, vd);
+    else if (b.dataset.at === 'daily') {
+      if (placedStart === null && !S.canPlace(state, 'k7', pid, dailyAt, null, vd)) S.dropProgram(state, 'k7', pid, dailyAt, null, vd);
+      const r = S.scheduleDaily(state, 'k7', pid, dailyAt, vd);
+      toast(`🔁 ${p.t} · ${hourLabel(HOURS[dailyAt]).slice(0, 2)} Uhr${r.placed ? ` · +${r.placed}` : ''}`, 'good');
+    } else {
+      const r = S.dropProgram(state, 'k7', pid, +b.dataset.at, placedStart, vd);
       if (r.ok && r.bumped.length) toast(`↩ ${r.bumped.map((x) => state.programs[x].t).join(', ')}`);
     }
     sfx.click();
@@ -784,9 +832,9 @@ function showProgInfo(pid, placedStart = null) {
 }
 
 function autoPlace(pid) {
-  const g = S.bestGap(state, 'k7', pid);
+  const g = S.bestGap(state, 'k7', pid, viewDay);
   if (!g) { toast(`⏱ ${S.progLen(state.programs[pid])} – keine Lücke`, 'bad'); sfx.bad(); return; }
-  S.placeProgram(state, 'k7', pid, g.hi);
+  S.placeProgram(state, 'k7', pid, g.hi, false, null, viewDay);
   sfx.click();
 }
 
@@ -846,6 +894,8 @@ const MANUAL = [
     <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen.
     <br><b>Antippen</b> (Regal oder Block): Infokarte mit Werten, Zielgruppen und erwarteter Quote je Startzeit. Startzeit antippen = dort einplanen (↩ = verdrängt etwas).
     <br>Werbevertrag auf einen Werbeplatz rechts ziehen, antippen = wieder frei.
+    <br>📅 <b>◀ Heute ▶</b>: bis zu ${S.PLAN_DAYS} Tage im Voraus planen. Ein Tag ohne eigenen Plan übernimmt den Vortag („= Vortag“). Werbung lässt sich bis zur Frist auch für kommende Tage einplanen.
+    <br>📺 <b>Serien</b> haben Staffeln mit Folgen (z. B. 3/8), jede Ausstrahlung zeigt die nächste Folge. Nach der letzten Folge geht es als Wiederholung von vorn. 👥 Stammpublikum: Läuft eine Serie täglich zur selben Uhrzeit, kommen jeden Tag mehr Zuschauer, eine Pause oder ein Wechsel der Uhrzeit setzt das zurück. 🔁 auf der Infokarte plant die restlichen Folgen täglich ein.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.
     <br>Der Plan bleibt von Tag zu Tag stehen. Planen kannst du nur hier im Büro.`],
@@ -950,7 +1000,7 @@ function tvInfo(sid, roomId) {
     return { mode: 'break', sid, next: next ? (st.schedule[hi + 1].part > 0 ? `${next.t} ▶` : next.t) : '' };
   }
   if (!p.prog) return { mode: 'test', sid, stamp: stp };
-  const part = p.len > 1 ? ` (${p.part + 1}/${p.len})` : '';
+  const part = (p.eps ? ` · F${p.ep}/${p.eps}` : '') + (p.len > 1 ? ` (${p.part + 1}/${p.len})` : '');
   return { mode: 'show', sid, genre: p.genre, title: p.title + part, crown: H.winner === sid, stamp: stp };
 }
 

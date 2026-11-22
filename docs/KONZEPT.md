@@ -120,6 +120,12 @@ Sendungen dauern **1–4 Blöcke** (Serien/Talk 1, Filme und große Shows 2–3,
 Bedienung wie im Original per **Drag & Drop** (Maus und Touch): Sendungen aus dem Regal auf die Zeitleiste ziehen, Blöcke verschieben (was im Weg ist, fliegt zurück ins Regal), Blöcke ins Regal ziehen zum Entfernen. Werbeverträge auf die Werbeplätze ziehen. Antippen im Regal setzt die Sendung in die beste freie Lücke. Eine laufende Sendung kann nicht abgebrochen werden, der Werbespot der laufenden Stunde ist bis :55 änderbar.
 Jeder Werbespot wird am Ende seines Blocks ausgewertet: Quote geschafft = **Teilzahlung** (Gesamtsumme / Spots), sonst nichts. Ist die Frist nicht mehr zu schaffen, gibt es sofort eine Strafe. Feedback: Stempel im Fernseher (✓ +27k / ✗), Toast und Jubel der Figur.
 
+### 4.3b Serien & Planung mehrerer Tage
+- **Staffeln mit Folgen** (6–13): Jede Ausstrahlung zeigt die nächste Folge (z. B. 3/8). Frische wird pro Folge geführt. Nach der letzten Folge geht es als Wiederholung von vorn.
+- **Stammpublikum 👥**: Läuft eine Serie täglich zur selben Uhrzeit, wächst ihr Publikum pro Folge (bis +60 %). Eine Pause oder ein Wechsel der Uhrzeit setzt den Bonus zurück. (Die Idee ist bei TVTower beschrieben.)
+- **Planer ◀ Heute ▶**: bis zu 6 Tage im Voraus. Ein Tag ohne eigenen Plan übernimmt den Vortag. Werbespots sind bis zur Vertragsfrist auch für kommende Tage planbar.
+- **🔁 Täglich** auf der Infokarte: plant die restlichen Folgen täglich zur selben Zeit ein, belegte Plätze bleiben, nach dem Staffelende wird die Wiederholung nicht automatisch weitergeführt.
+
 ### 4.4 Zuschauermodell (einfach erklärbar, tief genug)
 Fünf **Zielgruppen** mit unterschiedlichen Vorlieben je Uhrzeit:
 **Gen Z**, **Millennials**, **Familien**, **Boomer**, **Nerds**.

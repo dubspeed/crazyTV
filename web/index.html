@@ -161,6 +161,14 @@ button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .manual p { margin: 2px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); }
 .title-screen .logo { font-size: 64px; padding: 24px 0 8px; }
 
+.dayswitch { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.dayswitch b { font-family: var(--display); font-weight: 600; font-size: 17px; min-width: 70px; text-align: center; }
+.dayswitch .btn { padding: 6px 12px; }
+.tb-m .ep { background: rgba(23, 20, 46, 0.18); border-radius: 6px; padding: 0 5px; font-size: 11.5px; }
+.pi-eps { display: flex; gap: 3px; height: 26px; align-items: flex-end; }
+.pi-eps i { flex: 1; border-radius: 3px 3px 0 0; background: var(--good); height: calc(var(--f) * 100%); min-height: 3px; opacity: 0.75; }
+.pi-eps i.next { opacity: 1; box-shadow: 0 0 0 2px var(--text); }
+
 /* Sendungs-Infokarte */
 .pi-head { display: flex; gap: 12px; align-items: center; background: var(--gc); color: var(--ink); padding-bottom: 14px; }
 .m-head.pi-head p { color: rgba(23, 20, 46, 0.78); font-weight: 700; }

@@ -70,10 +70,21 @@ export function sellPrice(state, pid) {
   return round(programPrice(p) * 0.45 * (0.4 + 0.6 * p.fresh));
 }
 
+// ------------------------------------------------------------------ Serien: Staffeln mit Folgen
+function initEpisodes(p) {
+  if (p.k !== 'serie') return p;
+  const hash = [...p.id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  p.eps = p.e || 6 + (hash % 8); // 6–13 Folgen
+  p.epNext = 0;
+  p.epFresh = Array(p.eps).fill(p.fresh);
+  p.bond = 0;
+  return p;
+}
+
 // ------------------------------------------------------------------ Neues Spiel
 export function newGame(seed = (Date.now() % 1e9) | 0) {
   const state = {
-    version: 2,
+    version: 3,
     rng: seed,
     seed,
     day: 1,
@@ -95,9 +106,9 @@ export function newGame(seed = (Date.now() % 1e9) | 0) {
     nextId: 1,
     over: null,
   };
-  for (const p of PROGRAMS) state.programs[p.id] = { ...p, owner: null, fresh: 1, hype: p.h, airings: 0 };
+  for (const p of PROGRAMS) state.programs[p.id] = initEpisodes({ ...p, owner: null, fresh: 1, hype: p.h, airings: 0 });
   for (const sid of Object.keys(STATIONS)) {
-    for (const p of STARTERS[sid]) state.programs[p.id] = { ...p, owner: sid, fresh: 0.75, hype: p.h, airings: 3 };
+    for (const p of STARTERS[sid]) state.programs[p.id] = initEpisodes({ ...p, owner: sid, fresh: 0.75, hype: p.h, airings: 3 });
     state.stations[sid] = {
       id: sid,
       money: START_MONEY,
@@ -210,7 +221,8 @@ export function attraction(state, sid, pid, hi, g, leadShare = 0, opts = {}) {
   let a = Math.pow(p.q / 100, 1.3) * GENRES[p.g].pref[gi] * hourFit(p.g, h);
   a *= 0.35 + 0.65 * (opts.fresh ?? p.fresh);
   a *= 1 + (opts.hype ?? p.hype);
-  if (state.trend && state.trend.g === p.g) a *= 1.25;
+  if (!opts.future && state.trend && state.trend.g === p.g) a *= 1.25;
+  if (opts.bond) a *= 1 + 0.6 * opts.bond; // Stammpublikum einer Serie
   a *= opts.cont ? 1 + 1.1 * leadShare : 1 + 0.4 * leadShare; // laufende Sendung hält ihr Publikum über die Werbepause
   if (h === 20) a *= newsMul(state, sid);
   const st = state.stations[sid];
@@ -220,11 +232,11 @@ export function attraction(state, sid, pid, hi, g, leadShare = 0, opts = {}) {
 }
 
 /** Schätzung für den Programmplaner: Zuschauer (Mio.) gegen durchschnittliche Konkurrenz. */
-export function estimate(state, sid, pid, hi, cont = false) {
+export function estimate(state, sid, pid, hi, cont = false, extra = {}) {
   let total = 0;
   const byGroup = {};
   for (const g of GROUP_KEYS) {
-    const a = attraction(state, sid, pid, hi, g, cont ? 0.3 : 0.15, { cont });
+    const a = attraction(state, sid, pid, hi, g, cont ? 0.3 : 0.15, { cont, ...extra });
     const rival = 0.33;
     const o = othersAttr(state, g, hi);
     const share = (a * a) / (a * a + 2 * rival * rival + o * o);
@@ -276,7 +288,15 @@ export function simulateHour(state, hi) {
     const slot = state.stations[s].schedule[hi];
     attrs[s] = {};
     const cont = !!slot.prog && slot.part > 0 && state.stations[s].schedule[hi - 1]?.prog === slot.prog;
-    for (const g of GROUP_KEYS) attrs[s][g] = attraction(state, s, slot.prog, hi, g, prevShare[s][g], { cont });
+    const P0 = slot.prog ? state.programs[slot.prog] : null;
+    const xo = { cont };
+    if (P0 && P0.eps) {
+      xo.fresh = P0.epFresh[P0.epNext];
+      const start = hi - (slot.part || 0);
+      xo.bond = slot.part ? P0.bond : (P0.bondSlot === start && P0.bondDay === state.day - 1 ? Math.min(1, P0.bond + 0.15) : P0.bondSlot === start && P0.bondDay === state.day ? P0.bond : 0.1);
+    }
+    for (const g of GROUP_KEYS) attrs[s][g] = attraction(state, s, slot.prog, hi, g, prevShare[s][g], xo);
+    attrs[s]._bond = xo.bond;
   }
   let othersTotal = 0;
   for (const s of sids) per[s] = { viewers: 0, byGroup: {} };
@@ -305,15 +325,33 @@ export function simulateHour(state, hi) {
     if (h === 20) summary[s].prime = per[s].viewers;
     per[s].part = slot.part || 0;
     per[s].len = P ? progLen(P) : 1;
+    if (P && P.eps) {
+      per[s].ep = P.epNext + 1;
+      per[s].eps = P.eps;
+      per[s].rerun = (P.season || 0) > 0 || P.epFresh[P.epNext] < 0.9;
+      per[s].bond = attrs[s]._bond;
+    }
     if (P && !slot.part) {
       if (P.lastAiredDay === state.day) summary[s].repeats++;
       P.lastAiredDay = state.day;
       P.airings++;
       P.hype = Math.max(0, P.hype - 0.08);
     }
-    if (P) {
+    if (P && P.eps) {
+      // Serie: Folge nutzt sich ab, nach dem letzten Block der Folge kommt die nächste
+      const e = P.epNext;
+      P.epFresh[e] = Math.max(0.1, P.epFresh[e] - 0.5 / progLen(P));
+      if ((slot.part || 0) === progLen(P) - 1) {
+        P.bond = attrs[s]._bond; P.bondDay = state.day; P.bondSlot = hi - (slot.part || 0);
+        P.epNext = (e + 1) % P.eps;
+        if (P.epNext === 0) P.season = (P.season || 0) + 1;
+      }
+      P.fresh = P.epFresh[P.epNext];
+    } else if (P) {
       // Frische sinkt pro Ausstrahlung (verteilt auf die Blöcke)
-      P.fresh = Math.max(0.1, P.fresh - (P.k === 'film' ? 0.35 : P.k === 'serie' ? 0.12 : 0.18) / progLen(P));
+      P.fresh = Math.max(0.1, P.fresh - (P.k === 'film' ? 0.35 : 0.18) / progLen(P));
+    }
+    if (P) {
       if (h >= 20 && h <= 22) {
         const jg = Math.pow(P.q / 100, 2) * GENRES[P.g].jury * 4 * (0.4 + 0.6 * P.fresh);
         st.jury += jg;
@@ -431,7 +469,10 @@ export function finishDay(state) {
   }
 
   // Frische erholt sich über Nacht
-  for (const p of Object.values(state.programs)) p.fresh = Math.min(1, p.fresh + 0.08);
+  for (const p of Object.values(state.programs)) {
+    if (p.eps) { p.epFresh = p.epFresh.map((f) => Math.min(1, f + 0.08)); p.fresh = p.epFresh[p.epNext]; }
+    else p.fresh = Math.min(1, p.fresh + 0.08);
+  }
 
   const result = { day: state.day, journal: journalSum(state, 'k7'), hours, summary, bossResult, headline: headline(state, hours, summary), event: state.event, trend: state.trend };
   state.lastResults = result;
@@ -493,135 +534,201 @@ export function seasonResult(state) {
 
 export function nextDay(state) {
   if (state.over) return;
-  state.day++;
+  const day = state.day + 1;
+  for (const sid of Object.keys(state.stations)) {
+    const st = state.stations[sid];
+    st.future ||= {};
+    st.schedule = st.future[day] || inherit(state, sid, st.schedule, day);
+    for (const d of Object.keys(st.future)) if (+d <= day) delete st.future[d];
+  }
+  state.day = day;
   startDay(state);
 }
 
-// ------------------------------------------------------------------ Programmplan (Blöcke)
-/** Startstunde und Länge der Sendung, die in Stunde hi liegt (oder null). */
-export function instanceAt(state, sid, hi) {
-  const c = state.stations[sid].schedule[hi];
-  if (!c || !c.prog) return null;
-  const start = hi - c.part;
-  return { pid: c.prog, start, len: progLen(state.programs[c.prog]) };
+// ------------------------------------------------------------------ Programmplan (Blöcke, mehrere Tage)
+export const PLAN_DAYS = 6; // so viele Tage im Voraus planbar
+
+function contractValid(st, cid, day) {
+  const c = st.contracts.find((x) => x.id === cid);
+  return !!c && !c.completed && c.deadlineDay >= day;
+}
+function inherit(state, sid, src, day) {
+  const st = state.stations[sid];
+  return src.map((c) => {
+    const owned = c.prog && state.programs[c.prog]?.owner === sid;
+    return { prog: owned ? c.prog : null, part: owned ? c.part : 0, ad: c.ad && contractValid(st, c.ad, day) ? c.ad : null };
+  });
+}
+/** Plan eines Tages (heute = aktueller Plan; Zukunft: eigener Plan oder vom Vortag übernommen). */
+export function planFor(state, sid, day = state.day) {
+  const st = state.stations[sid];
+  if (day <= state.day) return st.schedule;
+  if (st.future?.[day]) return st.future[day];
+  return inherit(state, sid, planFor(state, sid, day - 1), day);
+}
+export function hasOwnPlan(state, sid, day) {
+  return day <= state.day || !!state.stations[sid].future?.[day];
+}
+/** Plan zum Bearbeiten holen (übernimmt bei Bedarf den Vortag als eigenen Plan). */
+export function editPlan(state, sid, day = state.day) {
+  const st = state.stations[sid];
+  if (day <= state.day) return st.schedule;
+  st.future ||= {};
+  if (!st.future[day]) st.future[day] = inherit(state, sid, planFor(state, sid, day - 1), day);
+  return st.future[day];
 }
 
-/** Gesperrt: schon gesendet oder Teil einer Sendung, die bereits begonnen hat. */
-export function cellLocked(state, sid, hi) {
+/** Startstunde und Länge der Sendung, die in Stunde hi liegt (oder null). */
+export function instanceAt(state, sid, hi, day = state.day) {
+  const c = planFor(state, sid, day)[hi];
+  if (!c || !c.prog) return null;
+  return { pid: c.prog, start: hi - c.part, len: progLen(state.programs[c.prog]) };
+}
+
+/** Gesperrt: schon gesendet oder Teil einer Sendung, die bereits begonnen hat (nur heute). */
+export function cellLocked(state, sid, hi, day = state.day) {
+  if (day !== state.day) return false;
   if (!state.eve || state.eve.day !== state.day || state.eve.hi < 0) return false;
   if (hi <= state.eve.hi) return true;
   const inst = instanceAt(state, sid, hi);
   return !!inst && inst.start <= state.eve.hi;
 }
 
-/** Anzahl freier (ungesperrter) Blöcke ab hi. ignoreStart: Blöcke dieser Sendung zählen als frei. */
-export function gapAt(state, sid, hi, ignoreStart = null) {
+export function gapAt(state, sid, hi, ignoreStart = null, day = state.day) {
   let n = 0;
   for (let i = hi; i < HOURS.length; i++) {
-    const inst = instanceAt(state, sid, i);
-    if (cellLocked(state, sid, i) || (inst && inst.start !== ignoreStart)) break;
+    const inst = instanceAt(state, sid, i, day);
+    if (cellLocked(state, sid, i, day) || (inst && inst.start !== ignoreStart)) break;
     n++;
   }
   return n;
 }
 
-export function canPlace(state, sid, pid, hi, ignoreStart = null) {
-  return progLen(state.programs[pid]) <= gapAt(state, sid, hi, ignoreStart);
+export function canPlace(state, sid, pid, hi, ignoreStart = null, day = state.day) {
+  return progLen(state.programs[pid]) <= gapAt(state, sid, hi, ignoreStart, day);
 }
 
-function clearInstance(st, start, len) {
-  for (let i = start; i < start + len && i < HOURS.length; i++) { st.schedule[i].prog = null; st.schedule[i].part = 0; }
+function clearInstance(plan, start, len) {
+  for (let i = start; i < start + len && i < HOURS.length; i++) { plan[i].prog = null; plan[i].part = 0; }
+}
+function putInstance(plan, pid, hi, len) {
+  for (let i = 0; i < len; i++) { plan[hi + i].prog = pid; plan[hi + i].part = i; }
 }
 
-export function removeAt(state, sid, hi) {
-  const inst = instanceAt(state, sid, hi);
-  if (!inst || cellLocked(state, sid, inst.start)) return { ok: false };
-  clearInstance(state.stations[sid], inst.start, inst.len);
+export function removeAt(state, sid, hi, day = state.day) {
+  const inst = instanceAt(state, sid, hi, day);
+  if (!inst || cellLocked(state, sid, inst.start, day)) return { ok: false };
+  clearInstance(editPlan(state, sid, day), inst.start, inst.len);
   return { ok: true };
 }
 
-/** Sendung ab Stunde hi einplanen. replaceStart: diese bestehende Sendung wird ersetzt. */
-export function placeProgram(state, sid, pid, hi, force = false, replaceStart = null) {
-  const st = state.stations[sid];
+/** Sendung ab Stunde hi einplanen (nur in freie Blöcke). */
+export function placeProgram(state, sid, pid, hi, force = false, replaceStart = null, day = state.day) {
   const len = progLen(state.programs[pid]);
-  if (!force && !canPlace(state, sid, pid, hi, replaceStart)) return { ok: false, msg: `⏱ ${len} Std. – passt nicht` };
-  if (force && hi + len > HOURS.length) return { ok: false };
-  if (replaceStart !== null) { const old = instanceAt(state, sid, replaceStart); if (old) clearInstance(st, old.start, old.len); }
-  for (let i = 0; i < len; i++) { st.schedule[hi + i].prog = pid; st.schedule[hi + i].part = i; }
+  if (!force && !canPlace(state, sid, pid, hi, replaceStart, day)) return { ok: false, msg: `⏱ ${len} Std. – passt nicht` };
+  if (hi + len > HOURS.length) return { ok: false };
+  const plan = editPlan(state, sid, day);
+  if (replaceStart !== null) { const old = instanceAt(state, sid, replaceStart, day); if (old) clearInstance(plan, old.start, old.len); }
+  putInstance(plan, pid, hi, len);
   return { ok: true };
 }
 
 /** Drag & Drop: Sendung ab hi ablegen. fromStart = verschobene Sendung. Überlappende (ungesperrte) Sendungen fliegen raus. */
-export function dropProgram(state, sid, pid, hi, fromStart = null) {
-  const st = state.stations[sid];
+export function dropProgram(state, sid, pid, hi, fromStart = null, day = state.day) {
+  if (!dropFits(state, sid, pid, hi, fromStart, day)) return { ok: false, msg: '🔒' };
   const len = progLen(state.programs[pid]);
-  if (hi < 0 || hi + len > HOURS.length) return { ok: false, msg: `⏱ ${len}` };
-  for (let i = hi; i < hi + len; i++) {
-    const inst = instanceAt(state, sid, i);
-    if (cellLocked(state, sid, i) && !(inst && inst.start === fromStart)) return { ok: false, msg: '🔒' };
-  }
-  if (fromStart !== null) { const old = instanceAt(state, sid, fromStart); if (old) clearInstance(st, old.start, old.len); }
+  const plan = editPlan(state, sid, day);
+  if (fromStart !== null) { const old = instanceAt(state, sid, fromStart, day); if (old) clearInstance(plan, old.start, old.len); }
   const bumped = [];
   for (let i = hi; i < hi + len; i++) {
-    const inst = instanceAt(state, sid, i);
-    if (inst) { bumped.push(inst.pid); clearInstance(st, inst.start, inst.len); }
+    const inst = instanceAt(state, sid, i, day);
+    if (inst) { bumped.push(inst.pid); clearInstance(plan, inst.start, inst.len); }
   }
-  for (let i = 0; i < len; i++) { st.schedule[hi + i].prog = pid; st.schedule[hi + i].part = i; }
+  putInstance(plan, pid, hi, len);
   return { ok: true, bumped };
 }
 
-/** Prüft eine Ablage ohne sie auszuführen. */
-export function dropFits(state, sid, pid, hi, fromStart = null) {
+export function dropFits(state, sid, pid, hi, fromStart = null, day = state.day) {
   const len = progLen(state.programs[pid]);
   if (hi < 0 || hi + len > HOURS.length) return false;
   for (let i = hi; i < hi + len; i++) {
-    const inst = instanceAt(state, sid, i);
-    if (cellLocked(state, sid, i) && !(inst && inst.start === fromStart)) return false;
+    const inst = instanceAt(state, sid, i, day);
+    if (cellLocked(state, sid, i, day) && !(inst && inst.start === fromStart)) return false;
   }
   return true;
 }
 
-/** Beste freie Lücke für eine Sendung (für Antippen im Regal). */
-export function bestGap(state, sid, pid) {
+export function bestGap(state, sid, pid, day = state.day) {
   let best = null;
   for (let hi = 0; hi < HOURS.length; hi++) {
-    if (!canPlace(state, sid, pid, hi)) continue;
-    const e = estimateBlock(state, sid, pid, hi);
+    if (!canPlace(state, sid, pid, hi, null, day)) continue;
+    const e = estimateBlock(state, sid, pid, hi, day);
     if (!best || e > best.e) best = { hi, e };
   }
   return best;
 }
 
-/** Sendung um dir (−1/+1) Stunden verschieben, falls Platz ist. */
-export function moveProgram(state, sid, hi, dir) {
-  const inst = instanceAt(state, sid, hi);
-  if (!inst || cellLocked(state, sid, inst.start)) return { ok: false };
-  const ns = inst.start + dir;
-  if (ns < 0 || ns + inst.len > HOURS.length) return { ok: false };
-  const st = state.stations[sid];
-  const target = dir < 0 ? ns : inst.start + inst.len;
-  const other = instanceAt(state, sid, target);
-  if (cellLocked(state, sid, target)) return { ok: false };
-  if (other && other.start !== inst.start) {
-    // Tauschen mit der Nachbarsendung
-    const a = inst, b = other;
-    const first = dir < 0 ? b : a, second = dir < 0 ? a : b;
-    clearInstance(st, first.start, first.len);
-    clearInstance(st, second.start, second.len);
-    placeProgram(state, sid, second.pid, first.start, true);
-    placeProgram(state, sid, first.pid, first.start + second.len, true);
-    return { ok: true };
-  }
-  clearInstance(st, inst.start, inst.len);
-  placeProgram(state, sid, inst.pid, ns, true);
+/** Werbespot für Tag/Stunde setzen (null = leeren). */
+export function setAd(state, sid, hi, cid, day = state.day) {
+  if (day === state.day && adLocked(state, hi)) return { ok: false };
+  if (cid && !contractValid(state.stations[sid], cid, day)) return { ok: false, msg: '⏳' };
+  editPlan(state, sid, day)[hi].ad = cid;
   return { ok: true };
 }
 
+/** Welche Folge (0-basiert) läuft an Tag/Stunde? Zählt alle noch ungesendeten Ausstrahlungen davor. */
+export function expectedEpisode(state, sid, pid, day, hi) {
+  const p = state.programs[pid];
+  if (!p.eps) return null;
+  let n = 0;
+  const firstOpen = state.eve && state.eve.day === state.day ? state.eve.hi + 1 : 0;
+  for (let d = state.day; d <= day; d++) {
+    const plan = planFor(state, sid, d);
+    for (let i = d === state.day ? firstOpen : 0; i < HOURS.length; i++) {
+      if (d === day && i >= hi) break;
+      if (plan[i].prog === pid && plan[i].part === 0) n++;
+    }
+  }
+  return (p.epNext + n) % p.eps;
+}
+
+/** Serie täglich zur gleichen Zeit einplanen, bis die Staffel durch ist (belegte Plätze bleiben). */
+export function scheduleDaily(state, sid, pid, hi, fromDay = state.day) {
+  const last = Math.min(state.day + PLAN_DAYS, SEASON_DAYS);
+  let placed = 0;
+  let started = false;
+  for (let d = fromDay; d <= last; d++) {
+    const ep = expectedEpisode(state, sid, pid, d, hi);
+    const here = planFor(state, sid, d)[hi];
+    if (started && ep === 0) {
+      // Staffel durch: geerbte Wiederholung an diesem Tag entfernen und aufhören
+      if (here.prog === pid && here.part === 0 && !cellLocked(state, sid, hi, d)) removeAt(state, sid, hi, d);
+      break;
+    }
+    if (here.prog === pid && here.part === 0) { started = true; continue; }
+    if (canPlace(state, sid, pid, hi, null, d)) { placeProgram(state, sid, pid, hi, false, null, d); placed++; started = true; }
+  }
+  return { ok: true, placed };
+}
+
+/** Stammpublikum-Prognose für eine Serie an Tag/Stunde. */
+export function bondFor(state, p, hi, day = state.day) {
+  if (!p.eps) return 0;
+  if (p.bondSlot !== hi || p.bondDay === undefined) return 0.1;
+  if (p.bondDay === day - 1) return Math.min(1, p.bond + 0.15);
+  if (p.bondDay === day) return p.bond;
+  if (day > state.day && p.bondDay >= state.day - 1) return Math.min(1, p.bond + 0.15 * (day - p.bondDay));
+  return 0.1;
+}
+
 /** Durchschnittliche Zuschauer, wenn die Sendung ab hi läuft. */
-export function estimateBlock(state, sid, pid, hi) {
-  const len = progLen(state.programs[pid]);
+export function estimateBlock(state, sid, pid, hi, day = state.day) {
+  const p = state.programs[pid];
+  const len = progLen(p);
+  const opts = { future: day !== state.day, bond: bondFor(state, p, hi, day) };
+  if (p.eps) { const ep = expectedEpisode(state, sid, pid, day, hi); opts.fresh = p.epFresh[ep] ?? p.fresh; }
   let t = 0, n = 0;
-  for (let i = hi; i < Math.min(HOURS.length, hi + len); i++) { t += estimate(state, sid, pid, i, i > hi).total; n++; }
+  for (let i = hi; i < Math.min(HOURS.length, hi + len); i++) { t += estimate(state, sid, pid, i, i > hi, opts).total; n++; }
   return n ? t / n : 0;
 }
 
@@ -646,6 +753,7 @@ export function sellProgram(state, sid, pid) {
   book(state, sid, v, 'sell', p.t);
   p.owner = PROGRAMS.some((x) => x.id === pid) ? null : 'gone';
   for (let hi = 0; hi < HOURS.length; hi++) if (st.schedule[hi].prog === pid && !cellLocked(state, sid, hi)) { st.schedule[hi].prog = null; st.schedule[hi].part = 0; }
+  for (const plan of Object.values(st.future || {})) for (const c of plan) if (c.prog === pid) { c.prog = null; c.part = 0; }
   return { ok: true, msg: `„${p.t}“ für ${fmtMoney(v)} verkauft.` };
 }
 
