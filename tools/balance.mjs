@@ -1,9 +1,10 @@
 // Headless-Balancing: node tools/balance.mjs [spiele]
-import { newGame, simulateEvening, nextDay, aiDayPlan, aiEnterRoom, fmtMoney } from '../web/src/sim.js';
+import { newGame, simulateEvening, nextDay, aiDayPlan, aiEnterRoom, aiPlanSchedule, fmtMoney } from '../web/src/sim.js';
 const N = +(process.argv[2] || 20);
 function play(seed, mode) {
   const s = newGame(seed);
   while (!s.over) {
+    if (mode === 'ai') aiPlanSchedule(s, 'k7'); // KI-K7½ plant morgens vor wie die Rivalen
     for (const sid of (s.day % 2 ? ['trash', 'prestige', ...(mode === 'ai' ? ['k7'] : [])] : [...(mode === 'ai' ? ['k7'] : []), 'prestige', 'trash']))
       for (const r of aiDayPlan(s, sid)) aiEnterRoom(s, sid, r);
     simulateEvening(s);

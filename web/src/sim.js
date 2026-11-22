@@ -538,11 +538,13 @@ export function nextDay(state) {
   for (const sid of Object.keys(state.stations)) {
     const st = state.stations[sid];
     st.future ||= {};
-    st.schedule = st.future[day] || inherit(state, sid, st.schedule, day);
+    st.schedule = st.future[day] || HOURS.map(() => ({ prog: null, part: 0, ad: null }));
     for (const d of Object.keys(st.future)) if (+d <= day) delete st.future[d];
   }
   state.day = day;
   startDay(state);
+  // KI-Sender planen morgens einen Grundplan (später im Büro wird nachgebessert)
+  for (const sid of Object.keys(state.stations)) if (sid !== 'k7') aiPlanSchedule(state, sid);
 }
 
 // ------------------------------------------------------------------ Programmplan (Blöcke, mehrere Tage)
@@ -552,29 +554,22 @@ function contractValid(st, cid, day) {
   const c = st.contracts.find((x) => x.id === cid);
   return !!c && !c.completed && c.deadlineDay >= day;
 }
-function inherit(state, sid, src, day) {
-  const st = state.stations[sid];
-  return src.map((c) => {
-    const owned = c.prog && state.programs[c.prog]?.owner === sid;
-    return { prog: owned ? c.prog : null, part: owned ? c.part : 0, ad: c.ad && contractValid(st, c.ad, day) ? c.ad : null };
-  });
-}
-/** Plan eines Tages (heute = aktueller Plan; Zukunft: eigener Plan oder vom Vortag übernommen). */
+const emptyPlan = () => HOURS.map(() => ({ prog: null, part: 0, ad: null }));
+/** Plan eines Tages (heute = aktueller Plan; Zukunft: eigener Plan oder leer). */
 export function planFor(state, sid, day = state.day) {
   const st = state.stations[sid];
   if (day <= state.day) return st.schedule;
-  if (st.future?.[day]) return st.future[day];
-  return inherit(state, sid, planFor(state, sid, day - 1), day);
+  return st.future?.[day] || emptyPlan();
 }
 export function hasOwnPlan(state, sid, day) {
   return day <= state.day || !!state.stations[sid].future?.[day];
 }
-/** Plan zum Bearbeiten holen (übernimmt bei Bedarf den Vortag als eigenen Plan). */
+/** Plan zum Bearbeiten holen (legt für künftige Tage einen leeren Plan an). */
 export function editPlan(state, sid, day = state.day) {
   const st = state.stations[sid];
   if (day <= state.day) return st.schedule;
   st.future ||= {};
-  if (!st.future[day]) st.future[day] = inherit(state, sid, planFor(state, sid, day - 1), day);
+  if (!st.future[day]) st.future[day] = emptyPlan();
   return st.future[day];
 }
 
@@ -701,9 +696,7 @@ export function scheduleDaily(state, sid, pid, hi, fromDay = state.day) {
     const ep = expectedEpisode(state, sid, pid, d, hi);
     const here = planFor(state, sid, d)[hi];
     if (started && ep === 0) {
-      // Staffel durch: geerbte Wiederholung an diesem Tag entfernen und aufhören
-      if (here.prog === pid && here.part === 0 && !cellLocked(state, sid, hi, d)) removeAt(state, sid, hi, d);
-      break;
+      break; // Staffel durch
     }
     if (here.prog === pid && here.part === 0) { started = true; continue; }
     if (canPlace(state, sid, pid, hi, null, d)) { placeProgram(state, sid, pid, hi, false, null, d); placed++; started = true; }

@@ -621,7 +621,7 @@ function plannerHtml() {
     return `<div class="ad-chip${left <= 0 || !valid ? ' used' : ''}" ${left > 0 && valid ? `data-drag="ad" data-cid="${c.id}"` : ''}>💼 ${esc(c.brand)} <b>${left}</b><small>${c.group ? GROUPS[c.group].icon : ''}≥${m1(c.minM)} ⏳${c.deadlineDay - state.day + 1}</small></div>`;
   }).join('');
   const own = S.hasOwnPlan(state, 'k7', vd);
-  return `<div class="dayswitch"><button class="btn alt" data-act="day" data-d="-1" ${vd <= state.day ? 'disabled' : ''}>◀</button><b>${dayLabel(vd)}</b>${!own ? '<span class="pill">= Vortag</span>' : ''}<button class="btn alt" data-act="day" data-d="1" ${vd >= maxDay ? 'disabled' : ''}>▶</button></div>
+  return `<div class="dayswitch"><button class="btn alt" data-act="day" data-d="-1" ${vd <= state.day ? 'disabled' : ''}>◀</button><b>${dayLabel(vd)}</b>${!own ? '<span class="pill">leer</span>' : ''}<button class="btn alt" data-act="day" data-d="1" ${vd >= maxDay ? 'disabled' : ''}>▶</button></div>
     <div class="tl" id="tl" style="height:${HOURS.length * ROW}px">${tl}</div>
     <div class="shelf" id="shelf">${shelfP || '<span class="empty">—</span>'}</div>
     ${shelfA ? `<div class="shelf ads">${shelfA}</div>` : ''}`;
@@ -894,7 +894,7 @@ const MANUAL = [
     <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen.
     <br><b>Antippen</b> (Regal oder Block): Infokarte mit Werten, Zielgruppen und erwarteter Quote je Startzeit. Startzeit antippen = dort einplanen (↩ = verdrängt etwas).
     <br>Werbevertrag auf einen Werbeplatz rechts ziehen, antippen = wieder frei.
-    <br>📅 <b>◀ Heute ▶</b>: bis zu ${S.PLAN_DAYS} Tage im Voraus planen. Ein Tag ohne eigenen Plan übernimmt den Vortag („= Vortag“). Werbung lässt sich bis zur Frist auch für kommende Tage einplanen.
+    <br>📅 <b>◀ Heute ▶</b>: bis zu ${S.PLAN_DAYS} Tage im Voraus planen. Nicht geplante Tage bleiben leer (Testbild!). Werbung lässt sich bis zur Frist auch für kommende Tage einplanen.
     <br>📺 <b>Serien</b> haben Staffeln mit Folgen (z. B. 3/8), jede Ausstrahlung zeigt die nächste Folge. Nach der letzten Folge geht es als Wiederholung von vorn. 👥 Stammpublikum: Läuft eine Serie täglich zur selben Uhrzeit, kommen jeden Tag mehr Zuschauer, eine Pause oder ein Wechsel der Uhrzeit setzt das zurück. 🔁 auf der Infokarte plant die restlichen Folgen täglich ein.
     <br>★ = wie gut die Sendung zur Uhrzeit passt. Die Zahl rechts ist die Schätzung in Mio. Zuschauern.
     <br><span class="pill bad">2×</span> doppelt im Plan · <span class="pill warn">🥱</span> abgenutzt · 📰 gekaufte Nachrichten für 20 Uhr.

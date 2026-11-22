@@ -123,8 +123,8 @@ Jeder Werbespot wird am Ende seines Blocks ausgewertet: Quote geschafft = **Teil
 ### 4.3b Serien & Planung mehrerer Tage
 - **Staffeln mit Folgen** (6–13): Jede Ausstrahlung zeigt die nächste Folge (z. B. 3/8). Frische wird pro Folge geführt. Nach der letzten Folge geht es als Wiederholung von vorn.
 - **Stammpublikum 👥**: Läuft eine Serie täglich zur selben Uhrzeit, wächst ihr Publikum pro Folge (bis +60 %). Eine Pause oder ein Wechsel der Uhrzeit setzt den Bonus zurück. (Die Idee ist bei TVTower beschrieben.)
-- **Planer ◀ Heute ▶**: bis zu 6 Tage im Voraus. Ein Tag ohne eigenen Plan übernimmt den Vortag. Werbespots sind bis zur Vertragsfrist auch für kommende Tage planbar.
-- **🔁 Täglich** auf der Infokarte: plant die restlichen Folgen täglich zur selben Zeit ein, belegte Plätze bleiben, nach dem Staffelende wird die Wiederholung nicht automatisch weitergeführt.
+- **Planer ◀ Heute ▶**: bis zu 6 Tage im Voraus. Nicht geplante Tage bleiben **leer** (Testbild), nur Tag 1 startet mit den Archiv-Startern. KI-Sender planen jeden Morgen neu. Werbespots sind bis zur Vertragsfrist auch für kommende Tage planbar.
+- **🔁 Täglich** auf der Infokarte: plant die restlichen Folgen täglich zur selben Zeit ein (belegte Plätze bleiben) und hört mit dem Staffelende auf.
 
 ### 4.4 Zuschauermodell (einfach erklärbar, tief genug)
 Fünf **Zielgruppen** mit unterschiedlichen Vorlieben je Uhrzeit:
