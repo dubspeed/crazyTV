@@ -86,6 +86,7 @@ function initEpisodes(p) {
 export function newGame(seed = (Date.now() % 1e9) | 0) {
   const state = {
     version: 3,
+    options: { outageFine: false },
     rng: seed,
     seed,
     day: 1,
@@ -387,7 +388,7 @@ export function simulateHour(state, hi) {
     if (state.stations[s].schedule[hi].prog) continue;
     per[s].outage = true;
     summary[s].outages++;
-    book(state, s, -OUTAGE_FINE, 'outage', hourLabel(h));
+    if (state.options?.outageFine) book(state, s, -OUTAGE_FINE, 'outage', hourLabel(h));
     if (s !== winner && state.stations[s].image > 0) { state.stations[s].image -= 1; state.stations[winner].image += 1; }
   }
   const hr = { h, per, others: othersTotal, winner, loser };

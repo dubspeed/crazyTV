@@ -871,12 +871,19 @@ function openMenu() {
       <button class="btn alt" id="mHelp">📖 Handbuch</button>
       <button class="btn alt" id="mView">🎥 Ansicht zurücksetzen</button>
       <button class="btn alt" id="mSound">${soundOn ? '🔊' : '🔇'} Sound</button>
+      <button class="btn alt" id="mFine">${state.options?.outageFine ? '✅' : '⬜'} Bußgeld bei Sendeausfall (${k(S.OUTAGE_FINE)}/Std.)</button>
       <button class="btn pink" id="mNew">Neues Spiel</button>
     </div>`);
   $('#mResume').addEventListener('click', () => { closeModal(); speed = wasSpeed; });
   $('#mView').addEventListener('click', () => { world.resetView(); closeModal(); });
   $('#mSound').addEventListener('click', () => { soundOn = !soundOn; $('#mSound').textContent = `${soundOn ? '🔊' : '🔇'} Sound`; });
   $('#mHelp').addEventListener('click', () => showHelp());
+  $('#mFine').addEventListener('click', () => {
+    state.options ||= {};
+    state.options.outageFine = !state.options.outageFine;
+    $('#mFine').textContent = `${state.options.outageFine ? '✅' : '⬜'} Bußgeld bei Sendeausfall (${k(S.OUTAGE_FINE)}/Std.)`;
+    writeSave();
+  });
   $('#mNew').addEventListener('click', () => { clearSave(); closeModal(); showTitle(); });
 }
 
@@ -890,7 +897,7 @@ const MANUAL = [
     <br>Ab 18 Uhr läuft dein Programm <b>live</b>, Stunde für Stunde. Eine Stunde, die schon läuft oder gelaufen ist, ist fest. Alles danach kannst du bis zur letzten Minute umplanen, auch noch schnell etwas kaufen. Der Fernseher unten links zeigt das laufende Programm. Mit den Farbknöpfen schaltest du um, 🛋️ zeigt Familie Mittelmaß, ein Tipp aufs Bild verkleinert ihn. Nachts verraten die Fenster der Stadt, wer gerade was schaut (rot = Streaming).
     <br>💶 Geld wird <b>sofort</b> gebucht: Werbeerlöse nach jeder Sendestunde, Vertragsgeld mit dem letzten erfolgreichen Spot, Strafen, sobald eine Frist nicht mehr zu schaffen ist, Miete und Zinsen um 08 Uhr.
     <br>Um 01 Uhr kommt die Bilanz als Zusammenfassung.`],
-  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild = Sendeausfall: −1 ⭐ und ${k(S.OUTAGE_FINE)} Bußgeld pro Stunde, ab 2 Ausfällen am Tag wird die Chefin sauer.
+  ['office_k7', '📺 Büro', `📅 <b>Plan</b>: 7 Stundenblöcke, 18–01 Uhr. Jeder Block: 55 Min. Programm, dann 5 Min. Werbeblock (💼). Sendungen dauern 1–4 Blöcke (⏱) und passen nur in eine ausreichend große Lücke. Lange Filme werden jede Stunde von Werbung unterbrochen, die Zuschauer bleiben aber meist dran. Leerer Block = Testbild = Sendeausfall: −1 ⭐ pro Stunde, ab 2 Ausfällen am Tag wird die Chefin sauer. Optional (☰ Menü): zusätzlich ${k(S.OUTAGE_FINE)} Bußgeld pro Stunde.
     <br><b>Ziehen</b>: Sendung aus dem Regal auf eine Stunde ziehen. Blöcke in der Zeitleiste verschieben, was im Weg ist, fliegt zurück ins Regal. Block ins Regal ziehen = entfernen.
     <br><b>Antippen</b> (Regal oder Block): Infokarte mit Werten, Zielgruppen und erwarteter Quote je Startzeit. Startzeit antippen = dort einplanen (↩ = verdrängt etwas).
     <br>Werbevertrag auf einen Werbeplatz rechts ziehen, antippen = wieder frei.
@@ -940,7 +947,7 @@ function airHour(hi) {
   const H = S.simulateHour(state, hi);
   sfx.ding();
   if (H.winner === 'k7') sfx.cash();
-  if (H.per.k7.outage) { toast(`📺 Sendeausfall! −1 ⭐ −${k(S.OUTAGE_FINE)}`, 'bad'); sfx.bad(); }
+  if (H.per.k7.outage) { toast(`📺 Sendeausfall! −1 ⭐${state.options?.outageFine ? ` −${k(S.OUTAGE_FINE)}` : ''}`, 'bad'); sfx.bad(); }
   const wa = H.winner === 'k7' ? player : ai[H.winner]?.actor;
   if (wa) world.cheer(wa);
   for (const s of [SIDS[hi % 3], 'k7']) feedItems.unshift(S.comment(state, H, s));
