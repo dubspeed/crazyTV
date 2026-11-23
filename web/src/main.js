@@ -419,7 +419,7 @@ function officeBody() {
   } else if (tab === 'archive') {
     html += S.archive(state, 'k7').sort((a, b) => b.q - a.q).map((p) => {
       const bh = bestHour(p.id);
-      return `<div class="card"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}<span class="pill">⏱${S.progLen(p)}</span><span class="num">⏰ ${hourLabel(HOURS[bh.hi])}</span></div></div></div>`;
+      return `<button class="card card-btn" data-act="info" data-pid="${p.id}"><span style="font-size:20px">${GENRES[p.g].icon}</span><div class="grow"><h3>${esc(p.t)}</h3><div class="meta">${qbar(p.q)} ${fbar(p.fresh)}<span class="pill">⏱${S.progLen(p)}</span>${p.eps ? `<span class="pill">📺 ${p.epNext + 1}/${p.eps}</span>` : ''}<span class="num">⏰ ${hourLabel(HOURS[bh.hi])}</span></div></div><span class="chev">›</span></button>`;
     }).join('');
   } else if (tab === 'contracts') {
     html += contractList(st.contracts, false);
@@ -539,6 +539,7 @@ function act(a, d) {
   const me = 'k7';
   switch (a) {
     case 'tab': tabState[d.room] = d.tab; renderPanel(); break;
+    case 'info': showProgInfo(d.pid); break;
     case 'help': showHelp(openRoom); break;
     case 'adClear': S.setAd(state, 'k7', +d.hi, null, viewDay); renderPanel(); break;
     case 'day': viewDay = Math.max(state.day, Math.min(state.day + S.PLAN_DAYS, S.SEASON_DAYS, viewDay + +d.d)); renderPanel(); break;
@@ -794,26 +795,23 @@ function showProgInfo(pid, placedStart = null) {
   const dailyAt = placedStart ?? best?.hi;
   const aired = p.airings ? `${p.airings}×` : 'neu';
   const trend = vd === state.day && trendKnown() && state.trend.g === p.g;
-  const series = p.eps ? `<div class="pi-eps">${p.epFresh.map((f, i) => `<i class="${i === p.epNext ? 'next' : ''}" style="--f:${f}" title="Folge ${i + 1}"></i>`).join('')}</div>
-      <div class="meta"><span class="pill">📺 Folge ${p.epNext + 1}/${p.eps} als Nächstes</span>${p.season ? `<span class="pill warn">Wdh. ×${p.season}</span>` : ''}${dailyAt !== undefined ? `<span class="pill">👥 ${Math.round(S.bondFor(state, p, dailyAt, vd) * 100)} %</span>` : ''}</div>` : '';
-  openModal(`<div class="m-head pi-head g-${p.g}"><span class="pi-icon">${G.icon}</span><div style="min-width:0"><h2>${esc(p.t)}</h2><p>${esc(p.d || '')}</p></div></div>
-    <div class="m-body">
+  const series = p.eps ? `<div class="pi-row"><span class="pill">📺 ${p.epNext + 1}/${p.eps}</span>${p.season ? `<span class="pill warn">Wdh.×${p.season}</span>` : ''}${dailyAt !== undefined ? `<span class="pill">👥 ${Math.round(S.bondFor(state, p, dailyAt, vd) * 100)}%</span>` : ''}<div class="pi-eps">${p.epFresh.map((f, i) => `<i class="${i === p.epNext ? 'next' : ''}" style="--f:${f}" title="Folge ${i + 1}"></i>`).join('')}</div></div>` : '';
+  const fmtK = { film: 'Film', serie: 'Serie', show: 'Show' }[p.k];
+  openModal(`<div class="m-head pi-head g-${p.g}"><span class="pi-icon">${G.icon}</span><div style="min-width:0"><h2>${esc(p.t)}</h2><p>${G.name} · ${fmtK} · ⏱${len} · ${esc(p.d || '')}</p></div></div>
+    <div class="m-body pi">
       <div class="pi-stats">
-        <div><small>⏱</small><b>${len} Std.</b></div>
-        <div><small>${G.name}</small><b>${{ film: 'Film', serie: 'Serie', show: 'Show' }[p.k]}</b></div>
-        <div><small>Qualität</small>${qbar(p.q)}</div>
-        <div><small>Frische</small>${fbar(p.fresh)}</div>
-        <div><small>🔥 Hype</small>${qbar(p.hype / 0.6 * 100, 'var(--warn)')}</div>
-        <div><small>🏆 Jury</small>${qbar(G.jury * p.q, 'var(--prestige)')}</div>
-        <div><small>Gesendet</small><b>${aired}</b></div>
-        <div><small>Wert</small><b>${k(S.sellPrice(state, pid))}</b></div>
+        <div title="Qualität"><small>Q</small>${qbar(p.q)}</div>
+        <div title="Frische"><small>🥱</small>${fbar(p.fresh)}</div>
+        <div title="Hype"><small>🔥</small>${qbar(p.hype / 0.6 * 100, 'var(--warn)')}</div>
+        <div title="Jury"><small>🏆</small>${qbar(G.jury * p.q, 'var(--prestige)')}</div>
       </div>
+      <div class="pi-row"><span class="pill">📡 ${aired}</span><span class="pill">💰 ${k(S.sellPrice(state, pid))}</span>${G.peak.map((h) => `<span class="pill">⏰${hourLabel(h).slice(0, 2)}</span>`).join('')}${trend ? '<span class="pill good">📈</span>' : ''}</div>
+      <div class="pi-groups">${GROUP_KEYS.map((g, i) => `<div title="${GROUPS[g].name}"><span>${GROUPS[g].icon}</span>${qbar(G.pref[i] * 100, 'var(--k7)')}</div>`).join('')}</div>
       ${series}
-      <div class="pi-groups">${GROUP_KEYS.map((g, i) => `<div><span>${GROUPS[g].icon}</span>${qbar(G.pref[i] * 100, 'var(--k7)')}</div>`).join('')}</div>
-      <div class="meta"><span class="pill">📅 ${dayLabel(vd)}</span>${G.peak.map((h) => `<span class="pill">⏰ ${hourLabel(h).slice(0, 2)}</span>`).join('')}${trend ? '<span class="pill good">📈 Trend</span>' : ''}${p.fresh < 0.5 ? '<span class="pill warn">🥱</span>' : ''}</div>
       <div class="pi-hours">${starts.map((x, hi) => x ? `<button class="pi-h${x.ok ? '' : ' no'}${best && best.hi === hi ? ' best' : ''}${placedStart === hi ? ' cur' : ''}" data-at="${hi}" ${x.ok ? '' : 'disabled'}><i style="height:${(x.e / max) * 100}%"></i><b class="num">${m1(x.e)}</b><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span>${x.ok && !x.free ? '<em>↩</em>' : ''}</button>` : `<div class="pi-h none"><span class="num">${hourLabel(HOURS[hi]).slice(0, 2)}</span></div>`).join('')}</div>
+      <div class="pi-day">📅 ${dayLabel(vd)}</div>
     </div>
-    <div class="m-foot">${placedStart !== null && !S.cellLocked(state, 'k7', placedStart, vd) ? '<button class="btn pink" data-at="x">✕</button>' : ''}${p.eps && dailyAt !== undefined ? `<button class="btn gold" data-at="daily">🔁 Täglich ${hourLabel(HOURS[dailyAt]).slice(0, 2)} Uhr</button>` : ''}<button class="btn alt" data-close>OK</button></div>`);
+    <div class="m-foot">${placedStart !== null && !S.cellLocked(state, 'k7', placedStart, vd) ? '<button class="btn pink" data-at="x">✕</button>' : ''}${p.eps && dailyAt !== undefined ? `<button class="btn gold" data-at="daily">🔁 ${hourLabel(HOURS[dailyAt]).slice(0, 2)} Uhr</button>` : ''}<button class="btn alt" data-close>OK</button></div>`);
   $('#modal').querySelectorAll('[data-at]').forEach((b) => b.addEventListener('click', () => {
     if (b.disabled) return;
     if (b.dataset.at === 'x') S.removeAt(state, 'k7', placedStart, vd);
